@@ -8,40 +8,22 @@ import (
 	"better-auth/internal/auth"
 	"better-auth/internal/config"
 	"better-auth/internal/database"
-	"better-auth/internal/transport"
 	"better-auth/pkg/middleware"
-	"better-auth/pkg/plugins"
+
+	"gorm.io/gorm"
 )
-
-// BetterAuth is the main authentication system
-type BetterAuth struct {
-	core *auth.BetterAuth
-}
-
-// Config holds the configuration for Better Auth
-type Config = config.Config
-
-// User represents an authenticated user
-type User = auth.User
-
-// Session represents a user session
-type Session = auth.Session
-
-// Organization represents an organization
-type Organization = auth.Organization
-
-// UserContext contains user information in request context
-type UserContext = auth.UserContext
-
-// Plugin interface for extending functionality
-type Plugin = plugins.Plugin
-
-// Transport interface for customizing request/response handling
-type Transport = transport.Transport
 
 // New creates a new Better Auth instance
 func New(cfg *Config) (*BetterAuth, error) {
-	core, err := auth.New(cfg)
+	// Create database configuration with SQLite as default
+	dbConfig := &database.DatabaseConfig{
+		Dialector: nil, // Will be set to SQLite default in auth.NewFromDatabaseConfig
+		Config:    nil, // Use default GORM config
+		Type:      "sqlite",
+		FilePath:  "./better-auth.db",
+	}
+
+	core, err := auth.NewFromDatabaseConfig(dbConfig, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -61,9 +43,33 @@ func (ba *BetterAuth) Handler() http.Handler {
 	return ba.core
 }
 
-// Use adds a plugin to the authentication system
+// RegisterPlugin registers a plugin but doesn't enable it
+func (ba *BetterAuth) RegisterPlugin(plugin Plugin) error {
+	return ba.core.RegisterPlugin(plugin)
+}
+
+// EnablePlugin enables a plugin with configuration
+func (ba *BetterAuth) EnablePlugin(
+	ctx context.Context,
+	pluginName string,
+	config map[string]any,
+) error {
+	return ba.core.EnablePlugin(ctx, pluginName, config)
+}
+
+// DisablePlugin disables a plugin
+func (ba *BetterAuth) DisablePlugin(pluginName string) error {
+	return ba.core.DisablePlugin(pluginName)
+}
+
+// Use adds a plugin to the authentication system (deprecated - use RegisterPlugin and EnablePlugin)
 func (ba *BetterAuth) Use(plugin Plugin) error {
-	return ba.core.Use(plugin)
+	if err := ba.core.RegisterPlugin(plugin); err != nil {
+		return err
+	}
+	return ba.core.EnablePlugin(context.Background(), plugin.Name(), map[string]any{
+		"enabled": true,
+	})
 }
 
 // SetTransport sets a custom transport
@@ -102,7 +108,10 @@ func (ba *BetterAuth) GenerateJWT(user *User) (string, error) {
 }
 
 // CreateSession creates a new session for a user
-func (ba *BetterAuth) CreateSession(ctx context.Context, userID, ipAddress, userAgent string) (*Session, error) {
+func (ba *BetterAuth) CreateSession(
+	ctx context.Context,
+	userID, ipAddress, userAgent string,
+) (*Session, error) {
 	return ba.core.CreateSession(ctx, userID, ipAddress, userAgent)
 }
 
@@ -117,8 +126,8 @@ func (ba *BetterAuth) DeleteSession(ctx context.Context, token string) error {
 }
 
 // GetDatabase returns the database instance
-func (ba *BetterAuth) GetDatabase() Database {
-	return ba.core.GetDatabase()
+func (ba *BetterAuth) GetDatabase() *database.DB {
+	return ba.core.GetGormDB()
 }
 
 // Convenience functions for common configurations
@@ -135,22 +144,22 @@ func DefaultConfig() *Config {
 	}
 }
 
-// Database types for convenience
-type Database = database.Database
-
-// Database constructors
-func NewPostgresDB(connectionURL string) Database {
-	return database.NewPostgresDB(connectionURL)
+// NewDatabaseConfig creates a new database configuration with GORM dialector
+func NewDatabaseConfig(dialector gorm.Dialector, config *gorm.Config) *database.DatabaseConfig {
+	return &database.DatabaseConfig{
+		Dialector: dialector,
+		Config:    config,
+	}
 }
 
-func NewMySQLDB(connectionURL string) Database {
-	return database.NewMySQLDB(connectionURL)
-}
+// NewWithDatabase creates a new Better Auth instance with custom database
+func NewWithDatabase(cfg *Config, dbConfig *database.DatabaseConfig) (*BetterAuth, error) {
+	core, err := auth.NewFromDatabaseConfig(dbConfig, cfg)
+	if err != nil {
+		return nil, err
+	}
 
-func NewSQLiteDB(connectionURL string) Database {
-	return database.NewSQLiteDB(connectionURL)
-}
-
-func NewInMemoryDB() Database {
-	return database.NewInMemoryDB()
+	return &BetterAuth{
+		core: core,
+	}, nil
 }

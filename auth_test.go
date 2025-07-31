@@ -4,19 +4,36 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
 	"better-auth/internal/models"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
-func TestBetterAuth_SignUp(t *testing.T) {
+// createTestAuth creates a test auth instance with a unique database
+func createTestAuth(t *testing.T) *BetterAuth {
+	// Create a unique database file for this test
+	dbFile := fmt.Sprintf("./test-%s-%d.db", t.Name(), time.Now().UnixNano())
+
+	// Clean up the database file after the test
+	t.Cleanup(func() {
+		os.Remove(dbFile)
+	})
+
+	// Create database configuration with unique SQLite database
+	dialector := sqlite.Open(dbFile)
+	dbConfig := NewDatabaseConfig(dialector, &gorm.Config{})
+
 	config := &Config{
-		DatabaseURL:   "memory",
 		SecretKey:     "test-secret-key-for-testing-purposes-only",
 		SessionExpiry: 24 * time.Hour,
 		JWTExpiry:     1 * time.Hour,
@@ -24,8 +41,13 @@ func TestBetterAuth_SignUp(t *testing.T) {
 		PathPrefix:    "/auth",
 	}
 
-	auth, err := New(config)
+	auth, err := NewWithDatabase(config, dbConfig)
 	require.NoError(t, err)
+	return auth
+}
+
+func TestBetterAuth_SignUp(t *testing.T) {
+	auth := createTestAuth(t)
 
 	t.Run("Successful sign up", func(t *testing.T) {
 		reqBody := models.SignUpRequest{
@@ -54,20 +76,36 @@ func TestBetterAuth_SignUp(t *testing.T) {
 	})
 
 	t.Run("Duplicate email", func(t *testing.T) {
-		reqBody := models.SignUpRequest{
-			Email:    "test@example.com",
+		// First create a user
+		reqBody1 := models.SignUpRequest{
+			Email:    "duplicate@example.com",
+			Password: "TestPassword123!",
+			Name:     "Test User 1",
+		}
+
+		body1, _ := json.Marshal(reqBody1)
+		req1 := httptest.NewRequest("POST", "/auth/sign-up", bytes.NewBuffer(body1))
+		req1.Header.Set("Content-Type", "application/json")
+		w1 := httptest.NewRecorder()
+
+		auth.ServeHTTP(w1, req1)
+		assert.Equal(t, http.StatusCreated, w1.Code)
+
+		// Try to create another user with the same email
+		reqBody2 := models.SignUpRequest{
+			Email:    "duplicate@example.com",
 			Password: "TestPassword123!",
 			Name:     "Test User 2",
 		}
 
-		body, _ := json.Marshal(reqBody)
-		req := httptest.NewRequest("POST", "/auth/sign-up", bytes.NewBuffer(body))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
+		body2, _ := json.Marshal(reqBody2)
+		req2 := httptest.NewRequest("POST", "/auth/sign-up", bytes.NewBuffer(body2))
+		req2.Header.Set("Content-Type", "application/json")
+		w2 := httptest.NewRecorder()
 
-		auth.ServeHTTP(w, req)
+		auth.ServeHTTP(w2, req2)
 
-		assert.Equal(t, http.StatusConflict, w.Code)
+		assert.Equal(t, http.StatusConflict, w2.Code)
 	})
 
 	t.Run("Invalid email", func(t *testing.T) {
@@ -88,39 +126,27 @@ func TestBetterAuth_SignUp(t *testing.T) {
 }
 
 func TestBetterAuth_SignIn(t *testing.T) {
-	// Create a user that will persist across subtests
-	createUser := func() *BetterAuth {
-		config := &Config{
-			DatabaseURL:   "memory",
-			SecretKey:     "test-secret-key-for-testing-purposes-only",
-			SessionExpiry: 24 * time.Hour,
-			JWTExpiry:     1 * time.Hour,
-			BaseURL:       "http://localhost:8080",
-			PathPrefix:    "/auth",
-		}
+	auth := createTestAuth(t)
 
-		auth, err := New(config)
-		require.NoError(t, err)
-
-		// Create a user first
-		signUpBody := models.SignUpRequest{
-			Email:    "signin@example.com",
-			Password: "TestPassword123!",
-			Name:     "Sign In User",
-		}
-		body, _ := json.Marshal(signUpBody)
-		req := httptest.NewRequest("POST", "/auth/sign-up", bytes.NewBuffer(body))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		auth.ServeHTTP(w, req)
-		
-		// Verify user was created successfully
-		require.Equal(t, http.StatusCreated, w.Code, "User creation should succeed before testing sign-in")
-		
-		return auth
+	// Create a user first
+	signUpBody := models.SignUpRequest{
+		Email:    "signin@example.com",
+		Password: "TestPassword123!",
+		Name:     "Sign In User",
 	}
+	body, _ := json.Marshal(signUpBody)
+	req := httptest.NewRequest("POST", "/auth/sign-up", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	auth.ServeHTTP(w, req)
 
-	auth := createUser()
+	// Verify user was created successfully
+	require.Equal(
+		t,
+		http.StatusCreated,
+		w.Code,
+		"User creation should succeed before testing sign-in",
+	)
 
 	t.Run("Successful sign in", func(t *testing.T) {
 		reqBody := models.SignInRequest{
@@ -179,17 +205,7 @@ func TestBetterAuth_SignIn(t *testing.T) {
 }
 
 func TestBetterAuth_GetSession(t *testing.T) {
-	config := &Config{
-		DatabaseURL:   "memory",
-		SecretKey:     "test-secret-key-for-testing-purposes-only",
-		SessionExpiry: 24 * time.Hour,
-		JWTExpiry:     1 * time.Hour,
-		BaseURL:       "http://localhost:8080",
-		PathPrefix:    "/auth",
-	}
-
-	auth, err := New(config)
-	require.NoError(t, err)
+	auth := createTestAuth(t)
 
 	// Create a user and get session token
 	signUpBody := models.SignUpRequest{
@@ -204,7 +220,7 @@ func TestBetterAuth_GetSession(t *testing.T) {
 	auth.ServeHTTP(w, req)
 
 	var signUpResponse models.AuthResponse
-	err = json.Unmarshal(w.Body.Bytes(), &signUpResponse)
+	err := json.Unmarshal(w.Body.Bytes(), &signUpResponse)
 	require.NoError(t, err)
 	require.NotNil(t, signUpResponse.Session, "Session should not be nil")
 
@@ -252,17 +268,7 @@ func TestBetterAuth_GetSession(t *testing.T) {
 }
 
 func TestBetterAuth_Middleware(t *testing.T) {
-	config := &Config{
-		DatabaseURL:   "memory",
-		SecretKey:     "test-secret-key-for-testing-purposes-only",
-		SessionExpiry: 24 * time.Hour,
-		JWTExpiry:     1 * time.Hour,
-		BaseURL:       "http://localhost:8080",
-		PathPrefix:    "/auth",
-	}
-
-	auth, err := New(config)
-	require.NoError(t, err)
+	auth := createTestAuth(t)
 
 	// Create a user and get session token
 	signUpBody := models.SignUpRequest{
@@ -277,18 +283,21 @@ func TestBetterAuth_Middleware(t *testing.T) {
 	auth.ServeHTTP(w, req)
 
 	var signUpResponse models.AuthResponse
-	err = json.Unmarshal(w.Body.Bytes(), &signUpResponse)
+	err := json.Unmarshal(w.Body.Bytes(), &signUpResponse)
 	require.NoError(t, err)
 	require.NotNil(t, signUpResponse.Session, "Session should not be nil")
 
 	// Create a protected handler using middleware
-	protectedHandler := auth.Middleware().SessionAuth()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"message": "Protected endpoint accessed",
-		})
-	}))
+	protectedHandler := auth.Middleware().
+		SessionAuth()(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]any{
+				"message": "Protected endpoint accessed",
+			})
+		}),
+	)
 
 	t.Run("Valid session token", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/protected", nil)
@@ -302,7 +311,7 @@ func TestBetterAuth_Middleware(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		var response map[string]interface{}
+		var response map[string]any
 		err := json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 
@@ -320,16 +329,7 @@ func TestBetterAuth_Middleware(t *testing.T) {
 }
 
 func TestBetterAuth_JWT(t *testing.T) {
-	config := &Config{
-		DatabaseURL:   "memory",
-		SecretKey:     "test-secret-key-for-testing-purposes-only",
-		SessionExpiry: 24 * time.Hour,
-		JWTExpiry:     1 * time.Hour,
-		BaseURL:       "http://localhost:8080",
-	}
-
-	auth, err := New(config)
-	require.NoError(t, err)
+	auth := createTestAuth(t)
 
 	user := &models.User{
 		ID:            "test-user-id",
@@ -340,7 +340,7 @@ func TestBetterAuth_JWT(t *testing.T) {
 		UpdatedAt:     time.Now(),
 	}
 
-	err = auth.GetDatabase().CreateUser(context.Background(), user)
+	err := auth.GetDatabase().CreateUser(context.Background(), user)
 	require.NoError(t, err)
 
 	t.Run("Generate and validate JWT", func(t *testing.T) {
@@ -369,16 +369,7 @@ func TestBetterAuth_JWT(t *testing.T) {
 }
 
 func TestBetterAuth_Database(t *testing.T) {
-	config := &Config{
-		DatabaseURL:   "memory",
-		SecretKey:     "test-secret-key-for-testing-purposes-only",
-		SessionExpiry: 24 * time.Hour,
-		JWTExpiry:     1 * time.Hour,
-		BaseURL:       "http://localhost:8080",
-	}
-
-	auth, err := New(config)
-	require.NoError(t, err)
+	auth := createTestAuth(t)
 
 	db := auth.GetDatabase()
 
@@ -451,16 +442,7 @@ func TestBetterAuth_Database(t *testing.T) {
 }
 
 func TestBetterAuth_Transport(t *testing.T) {
-	config := &Config{
-		DatabaseURL:   "memory",
-		SecretKey:     "test-secret-key-for-testing-purposes-only",
-		SessionExpiry: 24 * time.Hour,
-		JWTExpiry:     1 * time.Hour,
-		BaseURL:       "http://localhost:8080",
-	}
-
-	auth, err := New(config)
-	require.NoError(t, err)
+	auth := createTestAuth(t)
 
 	transport := auth.GetTransport()
 
@@ -525,3 +507,4 @@ func TestBetterAuth_Config(t *testing.T) {
 		assert.Contains(t, corsConfig.AllowedMethods, "POST")
 	})
 }
+

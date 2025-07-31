@@ -1,13 +1,14 @@
 package auth
 
 import (
+	"better-auth/internal/models"
+	"better-auth/pkg/transport"
 	"context"
+	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
-
-	"better-auth/internal/models"
-	"better-auth/internal/transport"
 )
 
 // MiddlewareConfig configures authentication middleware
@@ -46,9 +47,10 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		// Add user to request context
-		ctx := context.WithValue(r.Context(), "user", user)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		// Add user to request context using transport
+		userCtx := &models.UserContext{User: user}
+		r = m.config.Transport.SetUserContext(r, userCtx)
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -56,10 +58,13 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 func (m *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, _ := m.authenticateRequest(r)
-		
-		// Add user to request context (can be nil)
-		ctx := context.WithValue(r.Context(), "user", user)
-		next.ServeHTTP(w, r.WithContext(ctx))
+
+		// Add user to request context using transport (can be nil)
+		if user != nil {
+			userCtx := &models.UserContext{User: user}
+			r = m.config.Transport.SetUserContext(r, userCtx)
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -67,7 +72,11 @@ func (m *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 func (m *AuthMiddleware) SessionAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if m.config.SessionService == nil {
-			m.config.Transport.WriteError(w, http.StatusInternalServerError, "session service not configured")
+			m.config.Transport.WriteError(
+				w,
+				http.StatusInternalServerError,
+				"session service not configured",
+			)
 			return
 		}
 
@@ -93,9 +102,11 @@ func (m *AuthMiddleware) SessionAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		// Add session to request context
-		ctx := context.WithValue(r.Context(), "session", session)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		// Add session to request context using transport
+		// Note: For session auth, we could also populate user info if needed
+		userCtx := &models.UserContext{Session: session}
+		r = m.config.Transport.SetUserContext(r, userCtx)
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -103,33 +114,28 @@ func (m *AuthMiddleware) SessionAuth(next http.Handler) http.Handler {
 func (m *AuthMiddleware) JWTAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if m.config.JWTService == nil {
-			m.config.Transport.WriteError(w, http.StatusInternalServerError, "JWT service not configured")
+			m.config.Transport.WriteError(
+				w,
+				http.StatusInternalServerError,
+				"JWT service not configured",
+			)
 			return
 		}
 
-		// Get JWT token from Authorization header
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
+		// Get JWT token using transport
+		token := m.config.Transport.ExtractToken(r)
+		if token == "" {
 			if !m.config.Optional {
-				m.config.Transport.WriteError(w, http.StatusUnauthorized, "authorization header required")
+				m.config.Transport.WriteError(
+					w,
+					http.StatusUnauthorized,
+					"authentication token required",
+				)
 				return
 			}
 			next.ServeHTTP(w, r)
 			return
 		}
-
-		// Extract token from "Bearer <token>" format
-		const bearerPrefix = "Bearer "
-		if !strings.HasPrefix(authHeader, bearerPrefix) {
-			if !m.config.Optional {
-				m.config.Transport.WriteError(w, http.StatusUnauthorized, "invalid authorization header format")
-				return
-			}
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		token := authHeader[len(bearerPrefix):]
 
 		// Validate JWT token
 		claims, err := m.config.JWTService.ValidateToken(token)
@@ -142,9 +148,15 @@ func (m *AuthMiddleware) JWTAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		// Add claims to request context
-		ctx := context.WithValue(r.Context(), "jwt_claims", claims)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		// Create user from JWT claims and add to request context using transport
+		user := &models.User{
+			ID:    claims.UserID,
+			Email: claims.Email,
+			Name:  claims.Name,
+		}
+		userCtx := &models.UserContext{User: user}
+		r = m.config.Transport.SetUserContext(r, userCtx)
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -167,36 +179,33 @@ func (m *AuthMiddleware) RoleAuth(requiredRoles ...string) func(http.Handler) ht
 				}
 			}
 
-			hasRole := false
-			for _, role := range requiredRoles {
-				if userRole == role {
-					hasRole = true
-					break
-				}
-			}
+			hasRole := slices.Contains(requiredRoles, userRole)
 
 			if !hasRole {
 				m.config.Transport.WriteError(w, http.StatusForbidden, "insufficient permissions")
 				return
 			}
 
-			// Add user to request context
-			ctx := context.WithValue(r.Context(), "user", user)
-			next.ServeHTTP(w, r.WithContext(ctx))
+			// Add user to request context using transport
+			userCtx := &models.UserContext{User: user}
+			r = m.config.Transport.SetUserContext(r, userCtx)
+			next.ServeHTTP(w, r)
 		})
 	}
 }
 
 // RateLimitMiddleware provides rate limiting
-func (m *AuthMiddleware) RateLimitMiddleware(requestsPerMinute int) func(http.Handler) http.Handler {
+func (m *AuthMiddleware) RateLimitMiddleware(
+	requestsPerMinute int,
+) func(http.Handler) http.Handler {
 	// Simple in-memory rate limiter (in production, use Redis or similar)
 	clients := make(map[string][]time.Time)
-	
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			clientIP := getClientIP(r)
 			now := time.Now()
-			
+
 			// Clean old entries
 			if requests, exists := clients[clientIP]; exists {
 				validRequests := []time.Time{}
@@ -207,27 +216,31 @@ func (m *AuthMiddleware) RateLimitMiddleware(requestsPerMinute int) func(http.Ha
 				}
 				clients[clientIP] = validRequests
 			}
-			
+
 			// Check rate limit
 			if len(clients[clientIP]) >= requestsPerMinute {
 				m.config.Transport.WriteError(w, http.StatusTooManyRequests, "rate limit exceeded")
 				return
 			}
-			
+
 			// Add current request
 			clients[clientIP] = append(clients[clientIP], now)
-			
+
 			next.ServeHTTP(w, r)
 		})
 	}
 }
 
 // CORSMiddleware provides CORS support
-func (m *AuthMiddleware) CORSMiddleware(allowedOrigins []string, allowedMethods []string, allowedHeaders []string) func(http.Handler) http.Handler {
+func (m *AuthMiddleware) CORSMiddleware(
+	allowedOrigins []string,
+	allowedMethods []string,
+	allowedHeaders []string,
+) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
-			
+
 			// Check if origin is allowed
 			allowed := false
 			for _, allowedOrigin := range allowedOrigins {
@@ -236,21 +249,21 @@ func (m *AuthMiddleware) CORSMiddleware(allowedOrigins []string, allowedMethods 
 					break
 				}
 			}
-			
+
 			if allowed {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 			}
-			
+
 			w.Header().Set("Access-Control-Allow-Methods", strings.Join(allowedMethods, ", "))
 			w.Header().Set("Access-Control-Allow-Headers", strings.Join(allowedHeaders, ", "))
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			
+
 			// Handle preflight requests
 			if r.Method == "OPTIONS" {
 				w.WriteHeader(http.StatusOK)
 				return
 			}
-			
+
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -258,34 +271,34 @@ func (m *AuthMiddleware) CORSMiddleware(allowedOrigins []string, allowedMethods 
 
 // authenticateRequest attempts to authenticate a request using available methods
 func (m *AuthMiddleware) authenticateRequest(r *http.Request) (*models.User, error) {
+	// Extract token using transport (supports Authorization header, cookies, query params)
+	token := m.config.Transport.ExtractToken(r)
+	if token == "" {
+		return nil, fmt.Errorf("no authentication token found")
+	}
+
 	// Try session authentication first
 	if m.config.SessionService != nil {
-		if token := m.config.SessionService.GetSessionFromRequest(r); token != "" {
-			if session, err := m.config.SessionService.ValidateSession(r.Context(), token); err == nil {
-				// Need to get user from session - this would require a user service
-				// For now, return a placeholder
-				return &models.User{ID: session.UserID}, nil
-			}
+		if session, err := m.config.SessionService.ValidateSession(r.Context(), token); err == nil {
+			// Need to get user from session - this would require a user service
+			// For now, return a placeholder
+			return &models.User{ID: session.UserID}, nil
 		}
 	}
 
 	// Try JWT authentication
 	if m.config.JWTService != nil {
-		authHeader := r.Header.Get("Authorization")
-		if strings.HasPrefix(authHeader, "Bearer ") {
-			token := authHeader[7:]
-			if claims, err := m.config.JWTService.ValidateToken(token); err == nil {
-				return &models.User{
-					ID:       claims.UserID,
-					Email:    claims.Email,
-					Name:     claims.Name,
-					Metadata: claims.Metadata,
-				}, nil
-			}
+		if claims, err := m.config.JWTService.ValidateToken(token); err == nil {
+			return &models.User{
+				ID:       claims.UserID,
+				Email:    claims.Email,
+				Name:     claims.Name,
+				Metadata: claims.Metadata,
+			}, nil
 		}
 	}
 
-	return nil, http.ErrNotSupported
+	return nil, fmt.Errorf("authentication failed")
 }
 
 // shouldSkipPath checks if the path should skip authentication
@@ -297,7 +310,6 @@ func (m *AuthMiddleware) shouldSkipPath(path string) bool {
 	}
 	return false
 }
-
 
 // GetUserFromContext extracts user from request context
 func GetUserFromContext(ctx context.Context) (*models.User, bool) {

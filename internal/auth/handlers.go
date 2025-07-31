@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -8,51 +9,61 @@ import (
 	"time"
 
 	"better-auth/internal/models"
+	"better-auth/pkg/transport"
+
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
 // Handlers contains all HTTP handlers
 type Handlers struct {
-	core *BetterAuth
+	core *AuthCore
+	transport.Transport
 }
 
 // NewHandlers creates a new handlers instance
-func NewHandlers(core *BetterAuth) *Handlers {
-	return &Handlers{core: core}
+func NewHandlers(core *AuthCore) *Handlers {
+	return &Handlers{core: core,
+		Transport: core.transport,
+	}
 }
 
 func (h *Handlers) SignUp(w http.ResponseWriter, r *http.Request) {
 	var req models.SignUpRequest
-	if err := h.core.transport.DecodeJSON(r, &req); err != nil {
-		h.core.transport.RespondError(w, http.StatusBadRequest, "Invalid JSON")
+	if err := h.DecodeJSON(r, &req); err != nil {
+		var validationErr *transport.ValidationError
+		if errors.As(err, &validationErr) {
+			h.RespondValidationError(w, validationErr)
+		} else {
+			h.RespondError(w, http.StatusBadRequest, "Invalid JSON")
+		}
 		return
 	}
 
 	if req.Email == "" || req.Password == "" {
-		h.core.transport.RespondError(w, http.StatusBadRequest, "Email and password are required")
+		h.RespondError(w, http.StatusBadRequest, "Email and password are required")
 		return
 	}
 
 	if err := validateEmail(req.Email); err != nil {
-		h.core.transport.RespondError(w, http.StatusBadRequest, err.Error())
+		h.RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if err := validatePassword(req.Password); err != nil {
-		h.core.transport.RespondError(w, http.StatusBadRequest, err.Error())
+		h.RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	existingUser, _ := h.core.db.GetUserByEmail(r.Context(), req.Email)
+	existingUser, _ := h.core.GetUserByEmail(r.Context(), req.Email)
 	if existingUser != nil {
-		h.core.transport.RespondError(w, http.StatusConflict, "User already exists")
+		h.RespondError(w, http.StatusConflict, "User already exists")
 		return
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		h.core.transport.RespondError(w, http.StatusInternalServerError, "Failed to hash password")
+		h.RespondError(w, http.StatusInternalServerError, "Failed to hash password")
 		return
 	}
 
@@ -69,14 +80,14 @@ func (h *Handlers) SignUp(w http.ResponseWriter, r *http.Request) {
 		Metadata:      req.Metadata,
 	}
 
-	if err := h.core.db.CreateUser(r.Context(), user); err != nil {
-		h.core.transport.RespondError(w, http.StatusInternalServerError, "Failed to create user")
+	if err := h.core.database.GetGormDB().WithContext(r.Context()).Create(user).Error; err != nil {
+		h.RespondError(w, http.StatusInternalServerError, "Failed to create user")
 		return
 	}
 
 	session, err := h.core.session.CreateSession(r.Context(), user.ID, getClientIP(r), r.UserAgent())
 	if err != nil {
-		h.core.transport.RespondError(w, http.StatusInternalServerError, "Failed to create session")
+		h.RespondError(w, http.StatusInternalServerError, "Failed to create session")
 		return
 	}
 
@@ -85,7 +96,7 @@ func (h *Handlers) SignUp(w http.ResponseWriter, r *http.Request) {
 	// Create a copy of the user for the response to avoid modifying the stored user
 	responseUser := *user
 	responseUser.Password = ""
-	h.core.transport.RespondJSON(w, http.StatusCreated, models.AuthResponse{
+	h.RespondJSON(w, http.StatusCreated, models.AuthResponse{
 		User:    &responseUser,
 		Session: session,
 		Token:   session.Token,
@@ -94,35 +105,40 @@ func (h *Handlers) SignUp(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) SignIn(w http.ResponseWriter, r *http.Request) {
 	var req models.SignInRequest
-	if err := h.core.transport.DecodeJSON(r, &req); err != nil {
-		h.core.transport.RespondError(w, http.StatusBadRequest, "Invalid JSON")
+	if err := h.DecodeJSON(r, &req); err != nil {
+		var validationErr *transport.ValidationError
+		if errors.As(err, &validationErr) {
+			h.RespondValidationError(w, validationErr)
+		} else {
+			h.RespondError(w, http.StatusBadRequest, "Invalid JSON")
+		}
 		return
 	}
 
 	if req.Email == "" || req.Password == "" {
-		h.core.transport.RespondError(w, http.StatusBadRequest, "Email and password are required")
+		h.RespondError(w, http.StatusBadRequest, "Email and password are required")
 		return
 	}
 
-	user, err := h.core.db.GetUserByEmail(r.Context(), req.Email)
+	user, err := h.core.GetUserByEmail(r.Context(), req.Email)
 	if err != nil {
-		h.core.transport.RespondError(w, http.StatusUnauthorized, "Invalid credentials")
+		h.RespondError(w, http.StatusUnauthorized, "Invalid credentials")
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
-		h.core.transport.RespondError(w, http.StatusUnauthorized, "Invalid credentials")
+		h.RespondError(w, http.StatusUnauthorized, "Invalid credentials")
 		return
 	}
 
 	if user.Blocked {
-		h.core.transport.RespondError(w, http.StatusForbidden, "User is blocked")
+		h.RespondError(w, http.StatusForbidden, "User is blocked")
 		return
 	}
 
 	session, err := h.core.session.CreateSession(r.Context(), user.ID, getClientIP(r), r.UserAgent())
 	if err != nil {
-		h.core.transport.RespondError(w, http.StatusInternalServerError, "Failed to create session")
+		h.RespondError(w, http.StatusInternalServerError, "Failed to create session")
 		return
 	}
 
@@ -132,12 +148,12 @@ func (h *Handlers) SignIn(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	user.LastSignIn = &now
 	user.SignInCount++
-	h.core.db.UpdateUser(r.Context(), user)
+	h.core.database.GetGormDB().WithContext(r.Context()).Save(user)
 
 	// Create a copy of the user for the response to avoid modifying the stored user
 	responseUser := *user
 	responseUser.Password = ""
-	h.core.transport.RespondJSON(w, http.StatusOK, models.AuthResponse{
+	h.RespondJSON(w, http.StatusOK, models.AuthResponse{
 		User:    &responseUser,
 		Session: session,
 		Token:   session.Token,
@@ -147,42 +163,42 @@ func (h *Handlers) SignIn(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) SignOut(w http.ResponseWriter, r *http.Request) {
 	token := h.core.session.GetSessionFromRequest(r)
 	if token == "" {
-		h.core.transport.RespondError(w, http.StatusBadRequest, "No session token provided")
+		h.RespondError(w, http.StatusBadRequest, "No session token provided")
 		return
 	}
 
 	if err := h.core.session.DeleteSession(r.Context(), token); err != nil {
-		h.core.transport.RespondError(w, http.StatusInternalServerError, "Failed to delete session")
+		h.RespondError(w, http.StatusInternalServerError, "Failed to delete session")
 		return
 	}
 
 	h.core.session.ClearSessionCookie(w)
-	h.core.transport.RespondJSON(w, http.StatusOK, map[string]string{"message": "Signed out successfully"})
+	h.RespondJSON(w, http.StatusOK, map[string]string{"message": "Signed out successfully"})
 }
 
 func (h *Handlers) GetSession(w http.ResponseWriter, r *http.Request) {
 	token := h.core.session.GetSessionFromRequest(r)
 	if token == "" {
-		h.core.transport.RespondError(w, http.StatusUnauthorized, "No session token provided")
+		h.RespondError(w, http.StatusUnauthorized, "No session token provided")
 		return
 	}
 
 	session, err := h.core.session.ValidateSession(r.Context(), token)
 	if err != nil {
-		h.core.transport.RespondError(w, http.StatusUnauthorized, "Invalid session")
+		h.RespondError(w, http.StatusUnauthorized, "Invalid session")
 		return
 	}
 
-	user, err := h.core.db.GetUser(r.Context(), session.UserID)
+	user, err := h.core.GetUser(r.Context(), session.UserID)
 	if err != nil {
-		h.core.transport.RespondError(w, http.StatusInternalServerError, "Failed to get user")
+		h.RespondError(w, http.StatusInternalServerError, "Failed to get user")
 		return
 	}
 
 	// Create a copy of the user for the response to avoid modifying the stored user
 	responseUser := *user
 	responseUser.Password = ""
-	h.core.transport.RespondJSON(w, http.StatusOK, models.SessionResponse{
+	h.RespondJSON(w, http.StatusOK, models.SessionResponse{
 		User:    &responseUser,
 		Session: session,
 	})
@@ -190,74 +206,84 @@ func (h *Handlers) GetSession(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	var req models.ResetPasswordRequest
-	if err := h.core.transport.DecodeJSON(r, &req); err != nil {
-		h.core.transport.RespondError(w, http.StatusBadRequest, "Invalid JSON")
+	if err := h.DecodeJSON(r, &req); err != nil {
+		var validationErr *transport.ValidationError
+		if errors.As(err, &validationErr) {
+			h.RespondValidationError(w, validationErr)
+		} else {
+			h.RespondError(w, http.StatusBadRequest, "Invalid JSON")
+		}
 		return
 	}
 
 	if req.Email == "" {
-		h.core.transport.RespondError(w, http.StatusBadRequest, "Email is required")
+		h.RespondError(w, http.StatusBadRequest, "Email is required")
 		return
 	}
 
 	// TODO: Implement password reset logic
-	h.core.transport.RespondJSON(w, http.StatusOK, map[string]string{"message": "Password reset email sent"})
+	h.RespondJSON(w, http.StatusOK, map[string]string{"message": "Password reset email sent"})
 }
 
 func (h *Handlers) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 	var req models.VerifyEmailRequest
-	if err := h.core.transport.DecodeJSON(r, &req); err != nil {
-		h.core.transport.RespondError(w, http.StatusBadRequest, "Invalid JSON")
+	if err := h.DecodeJSON(r, &req); err != nil {
+		var validationErr *transport.ValidationError
+		if errors.As(err, &validationErr) {
+			h.RespondValidationError(w, validationErr)
+		} else {
+			h.RespondError(w, http.StatusBadRequest, "Invalid JSON")
+		}
 		return
 	}
 
 	if req.Token == "" {
-		h.core.transport.RespondError(w, http.StatusBadRequest, "Token is required")
+		h.RespondError(w, http.StatusBadRequest, "Token is required")
 		return
 	}
 
 	// TODO: Implement email verification logic
-	h.core.transport.RespondJSON(w, http.StatusOK, map[string]string{"message": "Email verified successfully"})
+	h.RespondJSON(w, http.StatusOK, map[string]string{"message": "Email verified successfully"})
 }
 
 func (h *Handlers) SetupTwoFactor(w http.ResponseWriter, r *http.Request) {
 	// TODO: Implement 2FA setup
-	h.core.transport.RespondError(w, http.StatusNotImplemented, "Two-factor setup not implemented")
+	h.RespondError(w, http.StatusNotImplemented, "Two-factor setup not implemented")
 }
 
 func (h *Handlers) VerifyTwoFactor(w http.ResponseWriter, r *http.Request) {
 	// TODO: Implement 2FA verification
-	h.core.transport.RespondError(w, http.StatusNotImplemented, "Two-factor verification not implemented")
+	h.RespondError(w, http.StatusNotImplemented, "Two-factor verification not implemented")
 }
 
 func (h *Handlers) OAuthRedirect(w http.ResponseWriter, r *http.Request) {
 	// TODO: Implement OAuth redirect
-	h.core.transport.RespondError(w, http.StatusNotImplemented, "OAuth redirect not implemented")
+	h.RespondError(w, http.StatusNotImplemented, "OAuth redirect not implemented")
 }
 
 func (h *Handlers) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 	// TODO: Implement OAuth callback
-	h.core.transport.RespondError(w, http.StatusNotImplemented, "OAuth callback not implemented")
+	h.RespondError(w, http.StatusNotImplemented, "OAuth callback not implemented")
 }
 
 func (h *Handlers) CreateOrganization(w http.ResponseWriter, r *http.Request) {
 	// TODO: Implement organization creation
-	h.core.transport.RespondError(w, http.StatusNotImplemented, "Organization creation not implemented")
+	h.RespondError(w, http.StatusNotImplemented, "Organization creation not implemented")
 }
 
 func (h *Handlers) GetOrganization(w http.ResponseWriter, r *http.Request) {
 	// TODO: Implement get organization
-	h.core.transport.RespondError(w, http.StatusNotImplemented, "Get organization not implemented")
+	h.RespondError(w, http.StatusNotImplemented, "Get organization not implemented")
 }
 
 func (h *Handlers) InviteToOrganization(w http.ResponseWriter, r *http.Request) {
 	// TODO: Implement organization invitation
-	h.core.transport.RespondError(w, http.StatusNotImplemented, "Organization invitation not implemented")
+	h.RespondError(w, http.StatusNotImplemented, "Organization invitation not implemented")
 }
 
 func (h *Handlers) UpdateMemberRole(w http.ResponseWriter, r *http.Request) {
 	// TODO: Implement member role update
-	h.core.transport.RespondError(w, http.StatusNotImplemented, "Member role update not implemented")
+	h.RespondError(w, http.StatusNotImplemented, "Member role update not implemented")
 }
 
 // Validation functions
@@ -265,12 +291,12 @@ func validateEmail(email string) error {
 	if email == "" {
 		return fmt.Errorf("email is required")
 	}
-	
+
 	emailRegex := regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 	if !emailRegex.MatchString(email) {
 		return fmt.Errorf("invalid email format")
 	}
-	
+
 	return nil
 }
 

@@ -195,7 +195,7 @@ func (o *OAuthService) GetUserInfo(provider, accessToken string) (*OAuthUserInfo
 		return nil, fmt.Errorf("user info request failed: %s", string(body))
 	}
 
-	var rawUserInfo map[string]interface{}
+	var rawUserInfo map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&rawUserInfo); err != nil {
 		return nil, fmt.Errorf("failed to decode user info: %v", err)
 	}
@@ -292,4 +292,3 @@ func getString(data map[string]any, key string) string {
 	}
 	return ""
 }
-

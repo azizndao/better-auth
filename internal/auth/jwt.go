@@ -22,14 +22,14 @@ type JWTService struct {
 
 // JWTClaims represents JWT claims
 type JWTClaims struct {
-	UserID    string                 `json:"sub"`
-	Email     string                 `json:"email"`
-	Name      string                 `json:"name"`
-	Role      string                 `json:"role,omitempty"`
-	IssuedAt  int64                  `json:"iat"`
-	ExpiresAt int64                  `json:"exp"`
-	Issuer    string                 `json:"iss"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	UserID    string         `json:"sub"`
+	Email     string         `json:"email"`
+	Name      string         `json:"name"`
+	Role      string         `json:"role,omitempty"`
+	IssuedAt  int64          `json:"iat"`
+	ExpiresAt int64          `json:"exp"`
+	Issuer    string         `json:"iss"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
 }
 
 // NewJWTService creates a new JWT service
@@ -38,7 +38,7 @@ func NewJWTService(secret []byte, issuer string, expiry time.Duration) *JWTServi
 		secret = make([]byte, 32)
 		rand.Read(secret)
 	}
-	
+
 	return &JWTService{
 		secret: secret,
 		issuer: issuer,
@@ -59,7 +59,7 @@ func (j *JWTService) GenerateToken(user *models.User) (string, error) {
 		Metadata:  user.Metadata,
 	}
 
-	header := map[string]interface{}{
+	header := map[string]any{
 		"typ": "JWT",
 		"alg": "HS256",
 	}
@@ -125,7 +125,7 @@ func (j *JWTService) RefreshToken(tokenString string) (string, error) {
 	claims.IssuedAt = now.Unix()
 	claims.ExpiresAt = now.Add(j.expiry).Unix()
 
-	header := map[string]interface{}{
+	header := map[string]any{
 		"typ": "JWT",
 		"alg": "HS256",
 	}
@@ -181,3 +181,4 @@ func (j *JWTService) ExtractUserID(tokenString string) (string, error) {
 
 	return claims.UserID, nil
 }
+

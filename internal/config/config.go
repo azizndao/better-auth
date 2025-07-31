@@ -4,17 +4,16 @@ import "time"
 
 // Config holds the configuration for Better Auth
 type Config struct {
-	DatabaseURL      string        `json:"databaseUrl"`
-	SecretKey        string        `json:"secretKey"`
-	SessionExpiry    time.Duration `json:"sessionExpiry"`
-	JWTExpiry        time.Duration `json:"jwtExpiry"`
-	RateLimitEnabled bool          `json:"rateLimitEnabled"`
-	TwoFactorEnabled bool          `json:"twoFactorEnabled"`
+	SecretKey        string          `json:"secretKey"`
+	SessionExpiry    time.Duration   `json:"sessionExpiry"`
+	JWTExpiry        time.Duration   `json:"jwtExpiry"`
+	RateLimitEnabled bool            `json:"rateLimitEnabled"`
+	TwoFactorEnabled bool            `json:"twoFactorEnabled"`
 	Providers        []OAuthProvider `json:"providers"`
-	BaseURL          string        `json:"baseUrl"`
-	EmailConfig      *EmailConfig  `json:"emailConfig"`
-	CORSConfig       *CORSConfig   `json:"corsConfig"`
-	PathPrefix       string        `json:"pathPrefix"`
+	BaseURL          string          `json:"baseUrl"`
+	EmailConfig      *EmailConfig    `json:"emailConfig"`
+	CORSConfig       *CORSConfig     `json:"corsConfig"`
+	PathPrefix       string          `json:"pathPrefix"`
 }
 
 // CORSConfig holds CORS configuration

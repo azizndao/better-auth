@@ -1,0 +1,4 @@
+# Use 4 spaces for indentation
+[*.go]
+indent_style = space
+indent_size = 4

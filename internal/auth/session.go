@@ -5,17 +5,19 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"net/http"
 	"time"
 
-	"better-auth/internal/database"
 	"better-auth/internal/models"
+
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // SessionService handles session management
 type SessionService struct {
-	db     database.Database
+	db     *gorm.DB
 	expiry time.Duration
 	secure bool
 	domain string
@@ -29,7 +31,7 @@ type SessionOptions struct {
 }
 
 // NewSessionService creates a new session service
-func NewSessionService(db database.Database, opts SessionOptions) *SessionService {
+func NewSessionService(db *gorm.DB, opts SessionOptions) *SessionService {
 	if opts.Expiry == 0 {
 		opts.Expiry = 24 * time.Hour // Default 24 hours
 	}
@@ -43,7 +45,10 @@ func NewSessionService(db database.Database, opts SessionOptions) *SessionServic
 }
 
 // CreateSession creates a new session for a user
-func (s *SessionService) CreateSession(ctx context.Context, userID, ipAddress, userAgent string) (*models.Session, error) {
+func (s *SessionService) CreateSession(
+	ctx context.Context,
+	userID, ipAddress, userAgent string,
+) (*models.Session, error) {
 	token, err := s.generateSecureToken()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate session token: %v", err)
@@ -59,10 +64,10 @@ func (s *SessionService) CreateSession(ctx context.Context, userID, ipAddress, u
 		IPAddress: ipAddress,
 		UserAgent: userAgent,
 		Active:    true,
-		Data:      make(map[string]interface{}),
+		Data:      make(map[string]any),
 	}
 
-	if err := s.db.CreateSession(ctx, session); err != nil {
+	if err := s.db.WithContext(ctx).Create(session).Error; err != nil {
 		return nil, fmt.Errorf("failed to create session: %v", err)
 	}
 
@@ -71,14 +76,16 @@ func (s *SessionService) CreateSession(ctx context.Context, userID, ipAddress, u
 
 // GetSession retrieves a session by token
 func (s *SessionService) GetSession(ctx context.Context, token string) (*models.Session, error) {
-	session, err := s.db.GetSession(ctx, token)
-	if err != nil {
+	var session models.Session
+	if err := s.db.WithContext(ctx).First(&session, "token = ?", token).Error; err != nil {
 		return nil, fmt.Errorf("session not found: %v", err)
 	}
 
 	// Check if session is expired
 	if time.Now().After(session.ExpiresAt) {
-		s.db.DeleteSession(ctx, token) // Clean up expired session
+		s.db.WithContext(ctx).
+			Delete(&models.Session{}, "token = ?", token)
+			// Clean up expired session
 		return nil, fmt.Errorf("session has expired")
 	}
 
@@ -87,11 +94,14 @@ func (s *SessionService) GetSession(ctx context.Context, token string) (*models.
 		return nil, fmt.Errorf("session is inactive")
 	}
 
-	return session, nil
+	return &session, nil
 }
 
 // ValidateSession validates a session token and returns the session
-func (s *SessionService) ValidateSession(ctx context.Context, token string) (*models.Session, error) {
+func (s *SessionService) ValidateSession(
+	ctx context.Context,
+	token string,
+) (*models.Session, error) {
 	if token == "" {
 		return nil, fmt.Errorf("session token is required")
 	}
@@ -100,7 +110,10 @@ func (s *SessionService) ValidateSession(ctx context.Context, token string) (*mo
 }
 
 // RefreshSession extends the session expiry time
-func (s *SessionService) RefreshSession(ctx context.Context, token string) (*models.Session, error) {
+func (s *SessionService) RefreshSession(
+	ctx context.Context,
+	token string,
+) (*models.Session, error) {
 	session, err := s.GetSession(ctx, token)
 	if err != nil {
 		return nil, err
@@ -110,7 +123,7 @@ func (s *SessionService) RefreshSession(ctx context.Context, token string) (*mod
 	session.ExpiresAt = time.Now().Add(s.expiry)
 
 	// Update session in database
-	if err := s.db.UpdateSession(ctx, session); err != nil {
+	if err := s.db.WithContext(ctx).Save(session).Error; err != nil {
 		return nil, fmt.Errorf("failed to refresh session: %v", err)
 	}
 
@@ -119,14 +132,14 @@ func (s *SessionService) RefreshSession(ctx context.Context, token string) (*mod
 
 // DeactivateSession marks a session as inactive
 func (s *SessionService) DeactivateSession(ctx context.Context, token string) error {
-	session, err := s.db.GetSession(ctx, token)
-	if err != nil {
+	var session models.Session
+	if err := s.db.WithContext(ctx).First(&session, "token = ?", token).Error; err != nil {
 		return fmt.Errorf("session not found: %v", err)
 	}
 
 	session.Active = false
 
-	if err := s.db.UpdateSession(ctx, session); err != nil {
+	if err := s.db.WithContext(ctx).Save(&session).Error; err != nil {
 		return fmt.Errorf("failed to deactivate session: %v", err)
 	}
 
@@ -135,7 +148,7 @@ func (s *SessionService) DeactivateSession(ctx context.Context, token string) er
 
 // DeleteSession removes a session
 func (s *SessionService) DeleteSession(ctx context.Context, token string) error {
-	if err := s.db.DeleteSession(ctx, token); err != nil {
+	if err := s.db.WithContext(ctx).Delete(&models.Session{}, "token = ?", token).Error; err != nil {
 		return fmt.Errorf("failed to delete session: %v", err)
 	}
 
@@ -200,7 +213,11 @@ func (s *SessionService) GetSessionFromRequest(r *http.Request) string {
 }
 
 // UpdateSessionData updates session data
-func (s *SessionService) UpdateSessionData(ctx context.Context, token string, data map[string]interface{}) error {
+func (s *SessionService) UpdateSessionData(
+	ctx context.Context,
+	token string,
+	data map[string]any,
+) error {
 	session, err := s.GetSession(ctx, token)
 	if err != nil {
 		return err
@@ -208,14 +225,12 @@ func (s *SessionService) UpdateSessionData(ctx context.Context, token string, da
 
 	// Merge new data with existing data
 	if session.Data == nil {
-		session.Data = make(map[string]interface{})
+		session.Data = make(map[string]any)
 	}
 
-	for key, value := range data {
-		session.Data[key] = value
-	}
+	maps.Copy(session.Data, data)
 
-	if err := s.db.UpdateSession(ctx, session); err != nil {
+	if err := s.db.WithContext(ctx).Save(session).Error; err != nil {
 		return fmt.Errorf("failed to update session data: %v", err)
 	}
 
@@ -223,7 +238,7 @@ func (s *SessionService) UpdateSessionData(ctx context.Context, token string, da
 }
 
 // GetSessionData retrieves specific data from session
-func (s *SessionService) GetSessionData(ctx context.Context, token, key string) (interface{}, error) {
+func (s *SessionService) GetSessionData(ctx context.Context, token, key string) (any, error) {
 	session, err := s.GetSession(ctx, token)
 	if err != nil {
 		return nil, err
