@@ -5,7 +5,8 @@ import (
 	"net/http"
 
 	"better-auth/internal/models"
-	"github.com/go-playground/universal-translator"
+
+	ut "github.com/go-playground/universal-translator"
 	"github.com/go-playground/validator/v10"
 )
 
@@ -13,23 +14,23 @@ import (
 const (
 	// Default locale when no language is specified or supported
 	DefaultLocale = "en"
-	
+
 	// Context key for user data
 	UserContextKey = "betterauth.user"
-	
+
 	// Cookie name for session tokens
 	SessionCookieName = "better-auth.session_token"
-	
+
 	// HTTP headers
 	HeaderAuthorization  = "Authorization"
 	HeaderAcceptLanguage = "Accept-Language"
 	HeaderContentType    = "Content-Type"
-	
+
 	// Content types
 	ContentTypeJSON = "application/json"
-	
+
 	// Token prefix
-	BearerPrefix = "Bearer "
+	BearerPrefix    = "Bearer "
 	BearerPrefixLen = 7
 )
 
@@ -49,19 +50,19 @@ type Transport interface {
 	DecodeJSON(req *http.Request, v any) error
 	DecodeJSONWithLocale(req *http.Request, v any, locale string) error
 	RespondJSON(w http.ResponseWriter, status int, data any)
-	
+
 	// Error responses
 	RespondError(w http.ResponseWriter, status int, message string)
 	RespondValidationError(w http.ResponseWriter, validationErr *ValidationError)
 	WriteError(w http.ResponseWriter, status int, message string)
-	
+
 	// User context operations
-	GetUserContext(req *http.Request) (*models.UserContext, bool)
-	SetUserContext(req *http.Request, ctx *models.UserContext) *http.Request
-	
+	GetUserContext(req *http.Request) (*models.AuthData, bool)
+	SetUserContext(req *http.Request, ctx *models.AuthData) *http.Request
+
 	// Token operations
 	ExtractToken(req *http.Request) string
-	
+
 	// Cookie operations
 	SetCookie(w http.ResponseWriter, name, value string, maxAge int)
 	GetCookie(req *http.Request, name string) (string, error)
@@ -75,3 +76,4 @@ type Default struct {
 }
 
 type contextKey string
+

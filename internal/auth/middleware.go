@@ -1,14 +1,17 @@
+// Package auth provides authentication middleware and services.
 package auth
 
 import (
-	"better-auth/internal/models"
-	"better-auth/pkg/transport"
 	"context"
 	"fmt"
 	"net/http"
 	"slices"
 	"strings"
 	"time"
+
+	"better-auth/internal/models"
+	"better-auth/pkg/plugins/core"
+	"better-auth/pkg/transport"
 )
 
 // MiddlewareConfig configures authentication middleware
@@ -48,7 +51,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 		}
 
 		// Add user to request context using transport
-		userCtx := &models.UserContext{User: user}
+		userCtx := &models.AuthData{User: user}
 		r = m.config.Transport.SetUserContext(r, userCtx)
 		next.ServeHTTP(w, r)
 	})
@@ -61,7 +64,7 @@ func (m *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 
 		// Add user to request context using transport (can be nil)
 		if user != nil {
-			userCtx := &models.UserContext{User: user}
+			userCtx := &models.AuthData{User: user}
 			r = m.config.Transport.SetUserContext(r, userCtx)
 		}
 		next.ServeHTTP(w, r)
@@ -104,7 +107,7 @@ func (m *AuthMiddleware) SessionAuth(next http.Handler) http.Handler {
 
 		// Add session to request context using transport
 		// Note: For session auth, we could also populate user info if needed
-		userCtx := &models.UserContext{Session: session}
+		userCtx := &models.AuthData{Session: session}
 		r = m.config.Transport.SetUserContext(r, userCtx)
 		next.ServeHTTP(w, r)
 	})
@@ -148,13 +151,10 @@ func (m *AuthMiddleware) JWTAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		// Create user from JWT claims and add to request context using transport
 		user := &models.User{
-			ID:    claims.UserID,
-			Email: claims.Email,
-			Name:  claims.Name,
+			Model: core.Model{ID: claims.UserID},
 		}
-		userCtx := &models.UserContext{User: user}
+		userCtx := &models.AuthData{User: user}
 		r = m.config.Transport.SetUserContext(r, userCtx)
 		next.ServeHTTP(w, r)
 	})
@@ -187,7 +187,7 @@ func (m *AuthMiddleware) RoleAuth(requiredRoles ...string) func(http.Handler) ht
 			}
 
 			// Add user to request context using transport
-			userCtx := &models.UserContext{User: user}
+			userCtx := &models.AuthData{User: user}
 			r = m.config.Transport.SetUserContext(r, userCtx)
 			next.ServeHTTP(w, r)
 		})
@@ -282,17 +282,23 @@ func (m *AuthMiddleware) authenticateRequest(r *http.Request) (*models.User, err
 		if session, err := m.config.SessionService.ValidateSession(r.Context(), token); err == nil {
 			// Need to get user from session - this would require a user service
 			// For now, return a placeholder
-			return &models.User{ID: session.UserID}, nil
+			baseModel, err := core.NewModelFromID(session.UserID)
+			if err != nil {
+				return nil, err
+			}
+			return &models.User{Model: *baseModel}, nil
 		}
 	}
 
 	// Try JWT authentication
 	if m.config.JWTService != nil {
 		if claims, err := m.config.JWTService.ValidateToken(token); err == nil {
+			baseModel, err := core.NewModelFromID(claims.UserID)
+			if err != nil {
+				return nil, err
+			}
 			return &models.User{
-				ID:       claims.UserID,
-				Email:    claims.Email,
-				Name:     claims.Name,
+				Model:    *baseModel,
 				Metadata: claims.Metadata,
 			}, nil
 		}

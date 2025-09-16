@@ -9,27 +9,38 @@ import (
 	"time"
 
 	"better-auth/internal/models"
+	"better-auth/pkg/plugins/core"
+	"better-auth/pkg/router"
 	"better-auth/pkg/transport"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
-// Handlers contains all HTTP handlers
-type Handlers struct {
+// handlers contains all HTTP handlers
+type handlers struct {
 	core *AuthCore
 	transport.Transport
 }
 
-// NewHandlers creates a new handlers instance
-func NewHandlers(core *AuthCore) *Handlers {
-	return &Handlers{core: core,
-		Transport: core.transport,
-	}
+// newHandlers creates a new handlers instance
+func newHandlers(core *AuthCore) *handlers {
+	return &handlers{core: core, Transport: core.transport}
 }
 
-func (h *Handlers) SignUp(w http.ResponseWriter, r *http.Request) {
-	var req models.SignUpRequest
+func (h *handlers) registerRoutes(r router.RouteGroup) {
+	authGroup := r.Group("/auth")
+
+	authGroup.POST("/signup", h.signUp)
+	authGroup.POST("/signin", h.signIn)
+	authGroup.POST("/signout", h.signOut)
+	authGroup.GET("/session", h.GetSession)
+	authGroup.POST("/reset-password", h.resetPassword)
+	authGroup.POST("/verify-email", h.verifyEmail)
+}
+
+func (h *handlers) signUp(w http.ResponseWriter, r *http.Request) {
+	var req models.SignUpPayload
 	if err := h.DecodeJSON(r, &req); err != nil {
 		var validationErr *transport.ValidationError
 		if errors.As(err, &validationErr) {
@@ -61,31 +72,28 @@ func (h *Handlers) SignUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	if err != nil {
-		h.RespondError(w, http.StatusInternalServerError, "Failed to hash password")
-		return
-	}
-
 	now := time.Now()
 	user := &models.User{
-		ID:            uuid.New().String(),
+		Model:         core.Model{ID: uuid.New(), CreatedAt: now, UpdatedAt: now},
 		Email:         req.Email,
-		Name:          req.Name,
-		Image:         req.Image,
-		Password:      string(hashedPassword),
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		FirstName:     req.FirstName,
+		LastName:      req.LastName,
+		Password:      req.Password,
 		EmailVerified: false,
 		Metadata:      req.Metadata,
 	}
 
-	if err := h.core.database.GetGormDB().WithContext(r.Context()).Create(user).Error; err != nil {
+	if err := h.core.database.WithContext(r.Context()).Create(user).Error; err != nil {
 		h.RespondError(w, http.StatusInternalServerError, "Failed to create user")
 		return
 	}
 
-	session, err := h.core.session.CreateSession(r.Context(), user.ID, getClientIP(r), r.UserAgent())
+	session, err := h.core.session.CreateSession(
+		r.Context(),
+		user.ID,
+		getClientIP(r),
+		r.UserAgent(),
+	)
 	if err != nil {
 		h.RespondError(w, http.StatusInternalServerError, "Failed to create session")
 		return
@@ -93,18 +101,14 @@ func (h *Handlers) SignUp(w http.ResponseWriter, r *http.Request) {
 
 	h.core.session.SetSessionCookie(w, session.Token)
 
-	// Create a copy of the user for the response to avoid modifying the stored user
-	responseUser := *user
-	responseUser.Password = ""
 	h.RespondJSON(w, http.StatusCreated, models.AuthResponse{
-		User:    &responseUser,
+		User:    user,
 		Session: session,
-		Token:   session.Token,
 	})
 }
 
-func (h *Handlers) SignIn(w http.ResponseWriter, r *http.Request) {
-	var req models.SignInRequest
+func (h *handlers) signIn(w http.ResponseWriter, r *http.Request) {
+	var req models.SignInPayload
 	if err := h.DecodeJSON(r, &req); err != nil {
 		var validationErr *transport.ValidationError
 		if errors.As(err, &validationErr) {
@@ -131,12 +135,17 @@ func (h *Handlers) SignIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if user.Blocked {
-		h.RespondError(w, http.StatusForbidden, "User is blocked")
+	if user.BannedUtil.Time.After(time.Now()) {
+		h.RespondError(w, http.StatusLocked, "User is banned")
 		return
 	}
 
-	session, err := h.core.session.CreateSession(r.Context(), user.ID, getClientIP(r), r.UserAgent())
+	session, err := h.core.session.CreateSession(
+		r.Context(),
+		user.ID,
+		getClientIP(r),
+		r.UserAgent(),
+	)
 	if err != nil {
 		h.RespondError(w, http.StatusInternalServerError, "Failed to create session")
 		return
@@ -144,23 +153,14 @@ func (h *Handlers) SignIn(w http.ResponseWriter, r *http.Request) {
 
 	h.core.session.SetSessionCookie(w, session.Token)
 
-	// Update last sign in
-	now := time.Now()
-	user.LastSignIn = &now
-	user.SignInCount++
-	h.core.database.GetGormDB().WithContext(r.Context()).Save(user)
-
 	// Create a copy of the user for the response to avoid modifying the stored user
-	responseUser := *user
-	responseUser.Password = ""
 	h.RespondJSON(w, http.StatusOK, models.AuthResponse{
-		User:    &responseUser,
+		User:    user,
 		Session: session,
-		Token:   session.Token,
 	})
 }
 
-func (h *Handlers) SignOut(w http.ResponseWriter, r *http.Request) {
+func (h *handlers) signOut(w http.ResponseWriter, r *http.Request) {
 	token := h.core.session.GetSessionFromRequest(r)
 	if token == "" {
 		h.RespondError(w, http.StatusBadRequest, "No session token provided")
@@ -176,7 +176,7 @@ func (h *Handlers) SignOut(w http.ResponseWriter, r *http.Request) {
 	h.RespondJSON(w, http.StatusOK, map[string]string{"message": "Signed out successfully"})
 }
 
-func (h *Handlers) GetSession(w http.ResponseWriter, r *http.Request) {
+func (h *handlers) GetSession(w http.ResponseWriter, r *http.Request) {
 	token := h.core.session.GetSessionFromRequest(r)
 	if token == "" {
 		h.RespondError(w, http.StatusUnauthorized, "No session token provided")
@@ -204,8 +204,8 @@ func (h *Handlers) GetSession(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handlers) ResetPassword(w http.ResponseWriter, r *http.Request) {
-	var req models.ResetPasswordRequest
+func (h *handlers) resetPassword(w http.ResponseWriter, r *http.Request) {
+	var req models.ResetPasswordPayload
 	if err := h.DecodeJSON(r, &req); err != nil {
 		var validationErr *transport.ValidationError
 		if errors.As(err, &validationErr) {
@@ -225,8 +225,8 @@ func (h *Handlers) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	h.RespondJSON(w, http.StatusOK, map[string]string{"message": "Password reset email sent"})
 }
 
-func (h *Handlers) VerifyEmail(w http.ResponseWriter, r *http.Request) {
-	var req models.VerifyEmailRequest
+func (h *handlers) verifyEmail(w http.ResponseWriter, r *http.Request) {
+	var req models.VerifyEmailPayload
 	if err := h.DecodeJSON(r, &req); err != nil {
 		var validationErr *transport.ValidationError
 		if errors.As(err, &validationErr) {
@@ -246,44 +246,24 @@ func (h *Handlers) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 	h.RespondJSON(w, http.StatusOK, map[string]string{"message": "Email verified successfully"})
 }
 
-func (h *Handlers) SetupTwoFactor(w http.ResponseWriter, r *http.Request) {
+func (h *handlers) SetupTwoFactor(w http.ResponseWriter, r *http.Request) {
 	// TODO: Implement 2FA setup
 	h.RespondError(w, http.StatusNotImplemented, "Two-factor setup not implemented")
 }
 
-func (h *Handlers) VerifyTwoFactor(w http.ResponseWriter, r *http.Request) {
+func (h *handlers) VerifyTwoFactor(w http.ResponseWriter, r *http.Request) {
 	// TODO: Implement 2FA verification
 	h.RespondError(w, http.StatusNotImplemented, "Two-factor verification not implemented")
 }
 
-func (h *Handlers) OAuthRedirect(w http.ResponseWriter, r *http.Request) {
+func (h *handlers) OAuthRedirect(w http.ResponseWriter, r *http.Request) {
 	// TODO: Implement OAuth redirect
 	h.RespondError(w, http.StatusNotImplemented, "OAuth redirect not implemented")
 }
 
-func (h *Handlers) OAuthCallback(w http.ResponseWriter, r *http.Request) {
+func (h *handlers) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 	// TODO: Implement OAuth callback
 	h.RespondError(w, http.StatusNotImplemented, "OAuth callback not implemented")
-}
-
-func (h *Handlers) CreateOrganization(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement organization creation
-	h.RespondError(w, http.StatusNotImplemented, "Organization creation not implemented")
-}
-
-func (h *Handlers) GetOrganization(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement get organization
-	h.RespondError(w, http.StatusNotImplemented, "Get organization not implemented")
-}
-
-func (h *Handlers) InviteToOrganization(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement organization invitation
-	h.RespondError(w, http.StatusNotImplemented, "Organization invitation not implemented")
-}
-
-func (h *Handlers) UpdateMemberRole(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement member role update
-	h.RespondError(w, http.StatusNotImplemented, "Member role update not implemented")
 }
 
 // Validation functions

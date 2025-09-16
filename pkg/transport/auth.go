@@ -1,3 +1,4 @@
+// Package transport provides HTTP transport utilities
 package transport
 
 import (
@@ -10,12 +11,12 @@ func (t *Default) ExtractToken(req *http.Request) string {
 	if token := t.extractTokenFromHeader(req); token != "" {
 		return token
 	}
-	
+
 	// Try session cookie
 	if token := t.extractTokenFromCookie(req); token != "" {
 		return token
 	}
-	
+
 	// Try query parameter as fallback
 	return req.URL.Query().Get("token")
 }
@@ -26,11 +27,11 @@ func (t *Default) extractTokenFromHeader(req *http.Request) string {
 	if auth == "" {
 		return ""
 	}
-	
+
 	if len(auth) > BearerPrefixLen && auth[:BearerPrefixLen] == BearerPrefix {
 		return auth[BearerPrefixLen:]
 	}
-	
+
 	return ""
 }
 
@@ -65,3 +66,4 @@ func (t *Default) GetCookie(req *http.Request, name string) (string, error) {
 	}
 	return cookie.Value, nil
 }
+

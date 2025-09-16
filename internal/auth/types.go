@@ -3,27 +3,37 @@ package auth
 import "better-auth/internal/models"
 
 // Type aliases for backward compatibility
-type User = models.User
-type Session = models.Session
-type Organization = models.Organization
-type OAuthAccount = models.OAuthAccount
-type UserContext = models.UserContext
+
+type (
+	User         = models.User
+	Session      = models.Session
+	Organization = models.Organization
+	OAuthAccount = models.OAuthAccount
+	UserContext  = models.AuthData
+)
 
 // Request/Response types
-type SignUpRequest = models.SignUpRequest
-type SignInRequest = models.SignInRequest
-type ResetPasswordRequest = models.ResetPasswordRequest
-type ChangePasswordRequest = models.ChangePasswordRequest
-type VerifyEmailRequest = models.VerifyEmailRequest
-type TwoFactorSetupRequest = models.TwoFactorSetupRequest
-type TwoFactorVerifyRequest = models.TwoFactorVerifyRequest
-type UpdateUserRequest = models.UpdateUserRequest
-type CreateOrganizationRequest = models.CreateOrganizationRequest
-type InviteToOrganizationRequest = models.InviteToOrganizationRequest
-type UpdateMemberRoleRequest = models.UpdateMemberRoleRequest
+
+type (
+	SignUpRequest               = models.SignUpPayload
+	SignInRequest               = models.SignInPayload
+	ResetPasswordRequest        = models.ResetPasswordPayload
+	ChangePasswordRequest       = models.ChangePasswordPayload
+	VerifyEmailRequest          = models.VerifyEmailPayload
+	TwoFactorSetupRequest       = models.TwoFactorSetupPayload
+	TwoFactorVerifyRequest      = models.TwoFactorVerifyPayload
+	UpdateUserRequest           = models.UpdateUserPayload
+	CreateOrganizationRequest   = models.CreateOrganizationPayload
+	InviteToOrganizationRequest = models.InviteToOrganizationRequest
+	UpdateMemberRoleRequest     = models.UpdateMemberRoleRequest
+)
 
 // Response types
-type AuthResponse = models.AuthResponse
-type TwoFactorResponse = models.TwoFactorResponse
-type SessionResponse = models.SessionResponse
-type ErrorResponse = models.ErrorResponse
+
+type (
+	AuthResponse      = models.AuthResponse
+	TwoFactorResponse = models.TwoFactorResponse
+	SessionResponse   = models.SessionResponse
+	ErrorResponse     = models.ErrorResponse
+)
+

@@ -3,7 +3,6 @@ package betterauth
 import (
 	"better-auth/internal/auth"
 	"better-auth/internal/config"
-	"better-auth/internal/database"
 	"better-auth/pkg/plugins/core"
 	"better-auth/pkg/transport"
 )
@@ -33,7 +32,3 @@ type Plugin = core.Plugin
 
 // Transport interface for customizing request/response handling
 type Transport = transport.Transport
-
-// Database interface for database operations
-// Database is the GORM database instance
-type Database = database.DB

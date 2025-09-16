@@ -1,3 +1,4 @@
+// Package middleware provides middleware utilities for better-auth
 package middleware
 
 import (
@@ -57,10 +58,11 @@ func (m *Middleware) CORS(origins, methods, headers []string) func(http.Handler)
 var (
 	// DefaultCORSOrigins provides default CORS origins
 	DefaultCORSOrigins = []string{"http://localhost:3000", "http://localhost:8080"}
-	
+
 	// DefaultCORSMethods provides default CORS methods
 	DefaultCORSMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
-	
+
 	// DefaultCORSHeaders provides default CORS headers
 	DefaultCORSHeaders = []string{"Content-Type", "Authorization", "X-Requested-With"}
 )
+

@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"better-auth/internal/models"
+
+	"github.com/google/uuid"
 )
 
 // JWTService handles JWT token generation and validation
@@ -22,9 +24,7 @@ type JWTService struct {
 
 // JWTClaims represents JWT claims
 type JWTClaims struct {
-	UserID    string         `json:"sub"`
-	Email     string         `json:"email"`
-	Name      string         `json:"name"`
+	UserID    uuid.UUID      `json:"sub"`
 	Role      string         `json:"role,omitempty"`
 	IssuedAt  int64          `json:"iat"`
 	ExpiresAt int64          `json:"exp"`
@@ -51,8 +51,6 @@ func (j *JWTService) GenerateToken(user *models.User) (string, error) {
 	now := time.Now()
 	claims := JWTClaims{
 		UserID:    user.ID,
-		Email:     user.Email,
-		Name:      user.Name,
 		IssuedAt:  now.Unix(),
 		ExpiresAt: now.Add(j.expiry).Unix(),
 		Issuer:    j.issuer,
@@ -161,24 +159,3 @@ func (j *JWTService) verify(message, signature string) bool {
 	expectedSignature := j.sign(message)
 	return hmac.Equal([]byte(signature), []byte(expectedSignature))
 }
-
-// ExtractUserID extracts user ID from token without full validation
-func (j *JWTService) ExtractUserID(tokenString string) (string, error) {
-	parts := strings.Split(tokenString, ".")
-	if len(parts) != 3 {
-		return "", fmt.Errorf("invalid token format")
-	}
-
-	claimsJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return "", fmt.Errorf("failed to decode claims: %v", err)
-	}
-
-	var claims JWTClaims
-	if err := json.Unmarshal(claimsJSON, &claims); err != nil {
-		return "", fmt.Errorf("failed to unmarshal claims: %v", err)
-	}
-
-	return claims.UserID, nil
-}
-

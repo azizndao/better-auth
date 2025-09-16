@@ -1,139 +1,140 @@
+// Package models defines the data models for the authentication system.
 package models
 
 import (
+	"database/sql"
 	"time"
 
+	"better-auth/pkg/plugins/core"
+
+	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
 // User represents a user in the system
 type User struct {
-	ID                 string         `gorm:"primaryKey" json:"id"`
-	Email              string         `gorm:"uniqueIndex;not null" json:"email"`
-	EmailVerified      bool           `gorm:"default:false" json:"emailVerified"`
-	Name               string         `json:"name"`
-	Image              string         `json:"image,omitempty"`
-	Password           string         `json:"-"`
-	TwoFactorEnabled   bool           `gorm:"default:false" json:"twoFactorEnabled"`
-	TwoFactorSecret    string         `json:"-"`
-	CreatedAt          time.Time      `json:"createdAt"`
-	UpdatedAt          time.Time      `json:"updatedAt"`
-	DeletedAt          gorm.DeletedAt `gorm:"index" json:"-"`
-	Metadata           map[string]any `gorm:"serializer:json" json:"metadata,omitempty"`
-	LastSignIn         *time.Time     `json:"lastSignIn,omitempty"`
-	SignInCount        int            `gorm:"default:0" json:"signInCount"`
-	Blocked            bool           `gorm:"default:false" json:"blocked"`
-	EmailVerifyToken   string         `json:"-"`
-	PasswordResetToken string         `json:"-"`
+	core.Model
+	Email         string         `gorm:"uniqueIndex;not null" json:"email"`
+	EmailVerified bool           `gorm:"default:false"        json:"emailVerified"`
+	FirstName     string         `                            json:"firstName,omitempty"`
+	LastName      string         `                            json:"lastName,omitempty"`
+	Image         sql.NullString `                            json:"image"`
+	Password      string         `                            json:"-"`
+	Metadata      map[string]any `gorm:"serializer:json"      json:"metadata,omitempty"`
+	BannedAt      sql.NullTime   `                            json:"bannedAt"`
+	BannedUtil    sql.NullTime   `                            json:"bannedUntil"`
+	BanReason     sql.NullString `                            json:"banReason"`
+}
+
+func (u *User) BeforeSave(tx *gorm.DB) (err error) {
+	if u.Password != "" {
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(u.Password), bcrypt.DefaultCost)
+		if err != nil {
+			return err
+		}
+		u.Password = string(hashedPassword)
+	}
+	return nil
 }
 
 // Session represents a user session
 type Session struct {
-	ID        string         `gorm:"primaryKey" json:"id"`
-	UserID    string         `gorm:"not null;index" json:"userId"`
+	core.Model
+	UserID    uuid.UUID      `gorm:"not null;index"       json:"userId"`
 	Token     string         `gorm:"uniqueIndex;not null" json:"token"`
-	ExpiresAt time.Time      `gorm:"not null" json:"expiresAt"`
-	CreatedAt time.Time      `json:"createdAt"`
-	UpdatedAt time.Time      `json:"updatedAt"`
-	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
-	IPAddress string         `json:"ipAddress,omitempty"`
-	UserAgent string         `json:"userAgent,omitempty"`
-	Active    bool           `gorm:"default:true" json:"active"`
-	Device    string         `json:"device,omitempty"`
-	Data      map[string]any `gorm:"serializer:json" json:"data,omitempty"`
+	ExpiresAt time.Time      `gorm:"not null"             json:"expiresAt"`
+	IPAddress string         `                            json:"ipAddress,omitempty"`
+	UserAgent string         `                            json:"userAgent,omitempty"`
+	Active    bool           `gorm:"default:true"         json:"active"`
+	Device    string         `                            json:"device,omitempty"`
+	Data      map[string]any `gorm:"serializer:json"      json:"data,omitempty"`
 }
 
 // Organization represents an organization
 type Organization struct {
-	ID        string         `gorm:"primaryKey" json:"id"`
-	Name      string         `gorm:"not null" json:"name"`
-	Slug      string         `gorm:"uniqueIndex;not null" json:"slug"`
-	Logo      string         `json:"logo,omitempty"`
-	CreatedAt time.Time      `json:"createdAt"`
-	UpdatedAt time.Time      `json:"updatedAt"`
-	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
-	Metadata  map[string]any `gorm:"serializer:json" json:"metadata,omitempty"`
+	core.Model
+	Name     string         `gorm:"not null"             json:"name"`
+	Slug     string         `gorm:"uniqueIndex;not null" json:"slug"`
+	Logo     string         `                            json:"logo,omitempty"`
+	Metadata map[string]any `gorm:"serializer:json"      json:"metadata,omitempty"`
 }
 
 // OAuthAccount represents an OAuth account link
 type OAuthAccount struct {
-	ID           string         `gorm:"primaryKey" json:"id"`
-	UserID       string         `gorm:"not null;index" json:"userId"`
-	Provider     string         `gorm:"not null" json:"provider"`
-	ProviderID   string         `gorm:"not null" json:"providerId"`
-	Email        string         `json:"email,omitempty"`
-	AccessToken  string         `json:"-"`
-	RefreshToken string         `json:"-"`
-	ExpiresAt    *time.Time     `json:"expiresAt,omitempty"`
-	CreatedAt    time.Time      `json:"createdAt"`
-	UpdatedAt    time.Time      `json:"updatedAt"`
-	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
-	TokenType    string         `json:"tokenType,omitempty"`
-	Scope        string         `json:"scope,omitempty"`
+	core.Model
+	UserID       string         `gorm:"not null;index"  json:"userId"`
+	Provider     string         `gorm:"not null"        json:"provider"`
+	ProviderID   string         `gorm:"not null"        json:"providerId"`
+	Email        string         `                       json:"email,omitempty"`
+	AccessToken  string         `                       json:"-"`
+	RefreshToken string         `                       json:"-"`
+	TokenType    string         `                       json:"tokenType,omitempty"`
+	Scope        string         `                       json:"scope,omitempty"`
 	AccountData  map[string]any `gorm:"serializer:json" json:"accountData,omitempty"`
 }
 
-// UserContext contains user information for request context
-type UserContext struct {
-	User    *User    `json:"user"`
-	Session *Session `json:"session,omitempty"`
-	// Organization *Organization `json:"organization,omitempty"`
+// AuthData contains user information for request context
+type AuthData struct {
+	*Session
+	User         *User         `json:"user"`
+	Organization *Organization `json:"organization"`
 }
 
-// SignUpRequest represents a sign-up request
-type SignUpRequest struct {
-	Email               string         `json:"email" validate:"required,email"`
-	Password            string         `json:"password" validate:"required,min=8"`
-	Name                string         `json:"name"`
-	Image               string         `json:"image,omitempty"`
-	EmailVerifyCallback string         `json:"callbackURL,omitempty"`
-	Metadata            map[string]any `json:"metadata,omitempty"`
+// SignUpPayload represents a sign-up request
+type SignUpPayload struct {
+	Email               string         `json:"email"                 validate:"required,email"`
+	Password            string         `json:"password"              validate:"required,min=8"`
+	FirstName           string         `json:"firstName"`
+	LastName            string         `json:"lastName"`
+	EmailVerifyCallback *string        `json:"callbackURL"`
+	Metadata            map[string]any `json:"metadata"`
 }
 
-// SignInRequest represents a sign-in request
-type SignInRequest struct {
-	Email      string `json:"email" validate:"required,email"`
-	Password   string `json:"password" validate:"required"`
+// SignInPayload represents a sign-in request
+type SignInPayload struct {
+	Email      string `json:"email"      validate:"required,email"`
+	Password   string `json:"password"   validate:"required"`
 	RememberMe bool   `json:"rememberMe"`
 }
 
-// ResetPasswordRequest represents a password reset request
-type ResetPasswordRequest struct {
-	Email       string `json:"email" validate:"required,email"`
+// ResetPasswordPayload represents a password reset request
+type ResetPasswordPayload struct {
+	Email       string `json:"email"                 validate:"required,email"`
 	CallbackURL string `json:"callbackURL,omitempty"`
 }
 
-// ChangePasswordRequest represents a password change request
-type ChangePasswordRequest struct {
+// ChangePasswordPayload represents a password change request
+type ChangePasswordPayload struct {
 	CurrentPassword string `json:"currentPassword" validate:"required"`
-	NewPassword     string `json:"newPassword" validate:"required,min=8"`
+	NewPassword     string `json:"newPassword"     validate:"required,min=8"`
 }
 
-// VerifyEmailRequest represents an email verification request
-type VerifyEmailRequest struct {
+// VerifyEmailPayload represents an email verification request
+type VerifyEmailPayload struct {
 	Token string `json:"token" validate:"required"`
 }
 
-// TwoFactorSetupRequest represents a 2FA setup request
-type TwoFactorSetupRequest struct {
+// TwoFactorSetupPayload represents a 2FA setup request
+type TwoFactorSetupPayload struct {
 	Password string `json:"password" validate:"required"`
 }
 
-// TwoFactorVerifyRequest represents a 2FA verification request
-type TwoFactorVerifyRequest struct {
+// TwoFactorVerifyPayload represents a 2FA verification request
+type TwoFactorVerifyPayload struct {
 	Code string `json:"code" validate:"required,len=6"`
 }
 
-// UpdateUserRequest represents a user profile update request
-type UpdateUserRequest struct {
+// UpdateUserPayload represents a user profile update request
+type UpdateUserPayload struct {
 	Name     string         `json:"name,omitempty"`
 	Image    string         `json:"image,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
-// CreateOrganizationRequest represents an organization creation request
-type CreateOrganizationRequest struct {
-	Name     string         `json:"name" validate:"required"`
+// CreateOrganizationPayload represents an organization creation request
+type CreateOrganizationPayload struct {
+	Name     string         `json:"name"               validate:"required"`
 	Slug     string         `json:"slug"`
 	Logo     string         `json:"logo,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
@@ -154,8 +155,6 @@ type UpdateMemberRoleRequest struct {
 type AuthResponse struct {
 	User    *User    `json:"user"`
 	Session *Session `json:"session,omitempty"`
-	Token   string   `json:"token,omitempty"`
-	Error   string   `json:"error,omitempty"`
 }
 
 // TwoFactorResponse represents a 2FA setup response

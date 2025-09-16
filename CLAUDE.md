@@ -35,28 +35,64 @@ This project doesn't use Make, npm scripts, or other build tools. Use standard G
 
 ### Key Components
 
-1. **AuthCore** (`internal/auth/core.go`) - Main authentication engine that orchestrates all authentication operations
-2. **Plugin System** (`pkg/plugins/core/`) - Extensible architecture allowing conditional feature loading
-3. **Transport Layer** (`pkg/transport/`) - HTTP request/response abstraction for framework independence
-4. **Database Layer** (`internal/database/`) - GORM-based persistence with multi-database support
-5. **Middleware** (`pkg/middleware/`) - Authentication and authorization middleware
+1. **BetterAuth Core** (`internal/auth/core.go`) - Main authentication engine that orchestrates all authentication operations
+2. **Plugin System** (`pkg/plugins/core/`) - Extensible architecture with conditional loading, service registry, and route management
+3. **Transport Layer** (`pkg/transport/`) - HTTP request/response abstraction with JSON handling, validation, and context management
+4. **Database Layer** (`internal/database/`) - GORM-based persistence with custom dialector support and conditional migrations
+5. **Middleware** (`pkg/middleware/`) - Authentication and authorization middleware with transport integration
 
 ### Package Structure
 
 - `internal/` - Core implementation (auth, config, database, models)
-- `pkg/` - Public packages (middleware, plugins, transport)
-- `examples/` - Usage demonstrations
-- Root files - Main package entry point and comprehensive tests
+- `pkg/` - Public packages (middleware, plugins, transport, router)
+- `examples/` - Usage demonstrations (plugin-demo, custom-database)
+- Root files - Main package entry point (`betterauth.go`) and comprehensive tests (`auth_test.go`)
+
+### Database Configuration Approach
+
+**Custom Dialector Support**: Users can now pass any GORM dialector and configuration instead of relying on built-in drivers:
+```go
+// PostgreSQL example
+dialector := postgres.Open("connection-string")
+dbConfig := betterauth.NewDatabaseConfig(dialector, &gorm.Config{...})
+auth, err := betterauth.NewWithDatabase(cfg, dbConfig)
+```
+
+This eliminates driver dependencies and provides maximum flexibility for database configuration.
 
 ### Plugin Architecture
 
-Plugins are conditionally loaded and can:
-- Add database tables (via GORM models)
-- Register HTTP routes
-- Provide middleware
-- Add services to the registry
+**Conditional Loading System**: Plugins are registered but only enabled with configuration validation. This ensures:
+- Database tables are created only when plugins are enabled
+- Services are registered dynamically
+- Routes are applied without conflicts (duplicate route protection)
+- Lifecycle hooks (OnEnabled/OnDisabled) are called appropriately
 
-Available plugins: JWT, Organizations, Admin
+**Plugin Capabilities**:
+- Add database tables (via GORM models with conditional migrations)
+- Register HTTP routes with automatic conflict resolution
+- Provide middleware and services
+- Validate configuration before enabling
+
+**Available Plugins**:
+- **JWT Plugin** (`pkg/plugins/jwt/`) - Token management with refresh tokens and blacklisting
+- **Organizations Plugin** (`pkg/plugins/organizations/`) - Multi-tenant support with RBAC
+- **Admin Plugin** (`pkg/plugins/admin/`) - User management with audit logging and system metrics
+
+**Plugin Interface Implementation**:
+```go
+type Plugin interface {
+    Name() string
+    Initialize(ctx context.Context, db *gorm.DB) error
+    DatabaseModels() []DatabaseModel
+    Services() []PluginService
+    Routes() map[string]http.Handler
+    OnEnabled() error
+    OnDisabled() error
+    RequiredConfig() map[string]interface{}
+    ValidateConfig(config map[string]interface{}) error
+}
+```
 
 ### Database Support
 
@@ -84,9 +120,11 @@ Uses standard `net/http.Handler` interface, allowing integration with:
 ## Testing Approach
 
 - **Single comprehensive test file**: `auth_test.go`
-- **Framework**: testify for assertions
-- **Database**: In-memory SQLite
-- **Coverage**: All core flows, middleware, database operations, plugins
+- **Framework**: testify for assertions  
+- **Database**: Unique SQLite files per test (using `createTestAuth()` helper)
+- **Isolation**: Each test uses a separate database to prevent conflicts
+- **Coverage**: All core flows, middleware, database operations, plugins, transport layer
+- **Test Helper**: `createTestAuth(t *testing.T)` creates isolated test instances with cleanup
 
 ## Configuration Patterns
 
@@ -101,29 +139,56 @@ Configuration is centralized in `internal/config/config.go` with:
 
 ### Framework Agnostic Design
 - All HTTP handling uses standard `net/http` interfaces
-- Transport layer abstracts request/response operations
+- Transport layer abstracts request/response operations (JSON handling, validation, context management)
 - Middleware follows standard `func(http.Handler) http.Handler` pattern
+- **Transport Integration**: Always use `transport.Transport` interface methods instead of manual JSON/HTTP handling
 
 ### Plugin Conditional Loading
-- Tables only created when plugins are enabled
+- Tables only created when plugins are enabled (conditional GORM migrations)
 - Prevents unnecessary database overhead
-- Services registered dynamically based on enabled plugins
+- Services registered dynamically via ServiceRegistry
+- Route conflicts prevented by tracking applied routes
+- Plugin lifecycle properly managed (Initialize → Enable → Disable)
+
+### Transport Layer Usage
+- **Use `transport.ExtractToken(r)`** instead of manual Authorization header parsing
+- **Use `transport.SetUserContext(r, userCtx)`** instead of `context.WithValue()` 
+- **Use `transport.RespondJSON(w, status, data)`** for consistent JSON responses
+- **Use `transport.RespondError(w, status, message)`** for error responses
 
 ### Security Considerations
-- Always use parameterized queries
-- Password validation and hashing
-- Token extraction supports multiple methods (header, cookie, query)
+- Always use parameterized queries (GORM handles this)
+- Password validation and hashing with bcrypt
+- Token extraction supports multiple methods (header, cookie, query) via transport
 - Secure cookie settings for production
+- User context properly managed through transport layer
 
 ## Common Development Tasks
 
 When working with this codebase:
 
-1. **Adding new endpoints**: Add to appropriate handler file in `internal/auth/`
-2. **Creating plugins**: Implement the `Plugin` interface in `pkg/plugins/core/`
-3. **Database changes**: Add migrations via GORM models
-4. **Transport customization**: Extend or override methods in `pkg/transport/`
-5. **Middleware**: Add to `pkg/middleware/` following standard patterns
+1. **Adding new endpoints**: Add to appropriate handler file in `internal/auth/` and use transport methods for JSON/error handling
+2. **Creating plugins**: 
+   - Implement the `Plugin` interface in `pkg/plugins/[name]/`
+   - Use `BasePlugin` from `pkg/plugins/core/` for common functionality
+   - Add models, services, handlers, and plugin.go files
+   - Test plugin registration, enabling, and route conflicts
+3. **Database changes**: 
+   - Add GORM models with proper tags and table names
+   - Use conditional migrations via plugin system
+   - Test with custom dialectors (PostgreSQL, MySQL, SQLite)
+4. **Transport customization**: 
+   - Always use existing `transport.Transport` interface methods
+   - Extend via composition rather than modification
+   - Maintain consistency with JSON response formats
+5. **Middleware**: 
+   - Add to `pkg/middleware/` using transport for token extraction and context
+   - Follow standard `func(http.Handler) http.Handler` pattern
+   - Use `transport.SetUserContext()` instead of manual context management
+6. **Testing**: 
+   - Use `createTestAuth(t)` helper for isolated test instances
+   - Test database operations with unique SQLite files
+   - Verify plugin functionality and route registration
 
 ## Dependencies
 
@@ -158,3 +223,30 @@ Go version: 1.24.5+ (toolchain: go1.24.5)
 - **Structured Logging**: Prefer `slog` from Go 1.21+ for structured logging
 - **HTTP Routing**: Leverage Go 1.22+ enhanced ServeMux pattern matching
 - **Range Functions**: Use Go 1.23 range-over-function iterators where beneficial
+
+## Current Architecture State
+
+### Transport Layer Integration Status
+The codebase has been partially updated to use the `pkg/transport/` package consistently:
+
+**✅ Completed**:
+- Handlers in `internal/auth/handlers.go` properly use transport methods
+- Database configuration supports custom GORM dialectors
+- Plugin system has conditional loading and route conflict prevention
+
+**🚧 In Progress**:
+- Middleware in `internal/auth/middleware.go` is being updated to use transport methods
+- Some manual context management being replaced with transport methods
+- Token extraction being unified through transport interface
+
+**Key Integration Patterns**:
+```go
+// Use transport methods instead of manual handling
+token := transport.ExtractToken(r)                    // ✅ Not: manual header parsing
+userCtx := &models.UserContext{User: user}
+r = transport.SetUserContext(r, userCtx)              // ✅ Not: context.WithValue()
+transport.RespondJSON(w, http.StatusOK, data)         // ✅ Not: manual JSON encoding
+transport.RespondError(w, http.StatusBadRequest, msg) // ✅ Not: manual error responses
+```
+
+When working on middleware or handlers, always check if transport methods are being used consistently throughout the request lifecycle.

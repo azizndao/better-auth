@@ -47,7 +47,8 @@ func NewSessionService(db *gorm.DB, opts SessionOptions) *SessionService {
 // CreateSession creates a new session for a user
 func (s *SessionService) CreateSession(
 	ctx context.Context,
-	userID, ipAddress, userAgent string,
+	userID uuid.UUID,
+	ipAddress, userAgent string,
 ) (*models.Session, error) {
 	token, err := s.generateSecureToken()
 	if err != nil {
@@ -56,11 +57,9 @@ func (s *SessionService) CreateSession(
 
 	now := time.Now()
 	session := &models.Session{
-		ID:        uuid.New().String(),
 		UserID:    userID,
 		Token:     token,
 		ExpiresAt: now.Add(s.expiry),
-		CreatedAt: now,
 		IPAddress: ipAddress,
 		UserAgent: userAgent,
 		Active:    true,

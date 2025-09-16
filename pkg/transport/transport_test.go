@@ -22,44 +22,44 @@ func TestDecodeJSON_WithValidation(t *testing.T) {
 		errorMsg  string
 	}{
 		{
-			name: "valid signup request",
-			json: `{"email":"test@example.com","password":"password123","name":"Test User"}`,
-			model: &models.SignUpRequest{},
+			name:      "valid signup request",
+			json:      `{"email":"test@example.com","password":"password123","name":"Test User"}`,
+			model:     &models.SignUpPayload{},
 			wantError: false,
 		},
 		{
-			name: "invalid email",
-			json: `{"email":"invalid-email","password":"password123","name":"Test User"}`,
-			model: &models.SignUpRequest{},
+			name:      "invalid email",
+			json:      `{"email":"invalid-email","password":"password123","name":"Test User"}`,
+			model:     &models.SignUpPayload{},
 			wantError: true,
-			errorMsg: "Email must be a valid email address",
+			errorMsg:  "Email must be a valid email address",
 		},
 		{
-			name: "missing required email",
-			json: `{"password":"password123","name":"Test User"}`,
-			model: &models.SignUpRequest{},
+			name:      "missing required email",
+			json:      `{"password":"password123","name":"Test User"}`,
+			model:     &models.SignUpPayload{},
 			wantError: true,
-			errorMsg: "Email is a required field",
+			errorMsg:  "Email is a required field",
 		},
 		{
-			name: "password too short",
-			json: `{"email":"test@example.com","password":"123","name":"Test User"}`,
-			model: &models.SignUpRequest{},
+			name:      "password too short",
+			json:      `{"email":"test@example.com","password":"123","name":"Test User"}`,
+			model:     &models.SignUpPayload{},
 			wantError: true,
-			errorMsg: "Password must be at least 8 characters in length",
+			errorMsg:  "Password must be at least 8 characters in length",
 		},
 		{
-			name: "valid signin request",
-			json: `{"email":"test@example.com","password":"password123"}`,
-			model: &models.SignInRequest{},
+			name:      "valid signin request",
+			json:      `{"email":"test@example.com","password":"password123"}`,
+			model:     &models.SignInPayload{},
 			wantError: false,
 		},
 		{
-			name: "invalid JSON",
-			json: `{"email":"test@example.com","password":}`,
-			model: &models.SignInRequest{},
+			name:      "invalid JSON",
+			json:      `{"email":"test@example.com","password":}`,
+			model:     &models.SignInPayload{},
 			wantError: true,
-			errorMsg: "invalid JSON",
+			errorMsg:  "invalid JSON",
 		},
 	}
 
@@ -75,7 +75,7 @@ func TestDecodeJSON_WithValidation(t *testing.T) {
 					t.Errorf("expected error but got none")
 					return
 				}
-				
+
 				// Check if it's a validation error
 				var validationErr *ValidationError
 				if errors.As(err, &validationErr) {
@@ -115,7 +115,7 @@ func TestDecodeJSON_ValidationErrorMessages(t *testing.T) {
 	req := httptest.NewRequest("POST", "/test", bytes.NewBufferString(jsonStr))
 	req.Header.Set("Content-Type", "application/json")
 
-	var model models.SignUpRequest
+	var model models.SignUpPayload
 	err := transport.DecodeJSON(req, &model)
 
 	if err == nil {
@@ -162,28 +162,28 @@ func TestDecodeJSONWithLocale(t *testing.T) {
 			json:         `{"password":"123"}`,
 			locale:       "en",
 			expectedLang: "required field", // English translation
-			model:        &models.SignUpRequest{},
+			model:        &models.SignUpPayload{},
 		},
 		{
 			name:         "Spanish validation error",
 			json:         `{"password":"123"}`,
 			locale:       "es",
 			expectedLang: "requerido", // Spanish translation
-			model:        &models.SignUpRequest{},
+			model:        &models.SignUpPayload{},
 		},
 		{
 			name:         "French validation error",
 			json:         `{"password":"123"}`,
 			locale:       "fr",
 			expectedLang: "obligatoire", // French translation
-			model:        &models.SignUpRequest{},
+			model:        &models.SignUpPayload{},
 		},
 		{
 			name:         "Unsupported locale defaults to English",
 			json:         `{"password":"123"}`,
 			locale:       "de", // German not supported, should default to English
 			expectedLang: "required field",
-			model:        &models.SignUpRequest{},
+			model:        &models.SignUpPayload{},
 		},
 	}
 
@@ -219,7 +219,7 @@ func TestDecodeJSONWithLocale(t *testing.T) {
 			}
 
 			if !found {
-				t.Errorf("expected error message to contain '%s', got messages: %v", 
+				t.Errorf("expected error message to contain '%s', got messages: %v",
 					tt.expectedLang, validationErr.Errors)
 			}
 		})
@@ -283,7 +283,7 @@ func TestAcceptLanguageDetection(t *testing.T) {
 
 func TestRespondValidationError(t *testing.T) {
 	transport := NewDefault()
-	
+
 	// Create a validation error
 	validationErr := &ValidationError{
 		Errors: []models.ValidationError{
@@ -294,7 +294,7 @@ func TestRespondValidationError(t *testing.T) {
 				Value:   "",
 			},
 			{
-				Field:   "Password", 
+				Field:   "Password",
 				Message: "Password must be at least 8 characters in length",
 				Tag:     "min",
 				Value:   "[hidden]",
@@ -345,3 +345,4 @@ func TestRespondValidationError(t *testing.T) {
 		t.Errorf("unexpected password error: %+v", passwordError)
 	}
 }
+
