@@ -1,3 +1,10 @@
 *.db
 *.sqlite
 *.sqlite3
+
+CLAUDE.md
+
+.claude
+.vscode
+
+**/tmp/

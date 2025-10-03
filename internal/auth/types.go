@@ -8,7 +8,7 @@ type (
 	User         = models.User
 	Session      = models.Session
 	Organization = models.Organization
-	OAuthAccount = models.OAuthAccount
+	OAuthAccount = models.Account
 	UserContext  = models.AuthData
 )
 
@@ -36,4 +36,3 @@ type (
 	SessionResponse   = models.SessionResponse
 	ErrorResponse     = models.ErrorResponse
 )
-

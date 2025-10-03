@@ -1,6 +1,10 @@
+// Package config provides configuration for Better Auth
 package config
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 // Config holds the configuration for Better Auth
 type Config struct {
@@ -63,7 +67,7 @@ func DefaultCORSConfig() *CORSConfig {
 // Validate validates the configuration
 func (c *Config) Validate() error {
 	if c.SecretKey == "" {
-		return ErrMissingSecretKey
+		return errors.New("missing secret key")
 	}
 	if c.PathPrefix == "" {
 		c.PathPrefix = "/auth"

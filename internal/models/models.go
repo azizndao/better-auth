@@ -15,33 +15,43 @@ import (
 // User represents a user in the system
 type User struct {
 	core.Model
-	Email         string         `gorm:"uniqueIndex;not null" json:"email"`
-	EmailVerified bool           `gorm:"default:false"        json:"emailVerified"`
-	FirstName     string         `                            json:"firstName,omitempty"`
-	LastName      string         `                            json:"lastName,omitempty"`
-	Image         sql.NullString `                            json:"image"`
-	Password      string         `                            json:"-"`
-	Metadata      map[string]any `gorm:"serializer:json"      json:"metadata,omitempty"`
-	BannedAt      sql.NullTime   `                            json:"bannedAt"`
-	BannedUtil    sql.NullTime   `                            json:"bannedUntil"`
-	BanReason     sql.NullString `                            json:"banReason"`
+	Email         string          `gorm:"uniqueIndex;not null" json:"email"`
+	EmailVerified bool            `gorm:"default:false"        json:"emailVerified"`
+	FirstName     sql.NullString  `                            json:"firstName"`
+	LastName      string          `                            json:"lastName,omitempty"`
+	Image         sql.NullString  `                            json:"image"`
+	Password      sql.NullString  `                       json:"-"`
+	Metadata      *map[string]any `gorm:"serializer:json"      json:"metadata,omitempty"`
+	BannedAt      sql.NullTime    `                            json:"bannedAt"`
+	BannedUtil    sql.NullTime    `                            json:"bannedUntil"`
+	BanReason     sql.NullString  `                            json:"banReason"`
 }
 
 func (u *User) BeforeSave(tx *gorm.DB) (err error) {
-	if u.Password != "" {
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(u.Password), bcrypt.DefaultCost)
-		if err != nil {
-			return err
-		}
-		u.Password = string(hashedPassword)
+	if u.Password.String == "" {
+		return nil
 	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(u.Password.String), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	u.Password = sql.NullString{String: string(hashedPassword), Valid: true}
+
 	return nil
+}
+
+func (u *User) CheckPassword(password string) error {
+	if !u.Password.Valid {
+		return nil
+	}
+	return bcrypt.CompareHashAndPassword([]byte(u.Password.String), []byte(password))
 }
 
 // Session represents a user session
 type Session struct {
 	core.Model
-	UserID    uuid.UUID      `gorm:"not null;index"       json:"userId"`
+	UserID    uuid.UUID      `gorm:"not null;index" json:"userId"`
 	Token     string         `gorm:"uniqueIndex;not null" json:"token"`
 	ExpiresAt time.Time      `gorm:"not null"             json:"expiresAt"`
 	IPAddress string         `                            json:"ipAddress,omitempty"`
@@ -60,15 +70,15 @@ type Organization struct {
 	Metadata map[string]any `gorm:"serializer:json"      json:"metadata,omitempty"`
 }
 
-// OAuthAccount represents an OAuth account link
-type OAuthAccount struct {
+// Account represents an OAuth account link
+type Account struct {
 	core.Model
-	UserID       string         `gorm:"not null;index"  json:"userId"`
+	UserID       uuid.UUID      `gorm:"not null;index"  json:"userId"`
 	Provider     string         `gorm:"not null"        json:"provider"`
 	ProviderID   string         `gorm:"not null"        json:"providerId"`
 	Email        string         `                       json:"email,omitempty"`
-	AccessToken  string         `                       json:"-"`
-	RefreshToken string         `                       json:"-"`
+	AccessToken  sql.NullString `                       json:"-"`
+	RefreshToken sql.NullString `                       json:"-"`
 	TokenType    string         `                       json:"tokenType,omitempty"`
 	Scope        string         `                       json:"scope,omitempty"`
 	AccountData  map[string]any `gorm:"serializer:json" json:"accountData,omitempty"`
@@ -83,12 +93,12 @@ type AuthData struct {
 
 // SignUpPayload represents a sign-up request
 type SignUpPayload struct {
-	Email               string         `json:"email"                 validate:"required,email"`
-	Password            string         `json:"password"              validate:"required,min=8"`
-	FirstName           string         `json:"firstName"`
-	LastName            string         `json:"lastName"`
-	EmailVerifyCallback *string        `json:"callbackURL"`
-	Metadata            map[string]any `json:"metadata"`
+	Email               string          `json:"email"                 validate:"required,email"`
+	Password            string          `json:"password"              validate:"required,min=8"`
+	FirstName           *string         `json:"firstName"`
+	LastName            string          `json:"lastName"              validate:"required"`
+	EmailVerifyCallback *string         `json:"callbackURL"`
+	Metadata            *map[string]any `json:"metadata"`
 }
 
 // SignInPayload represents a sign-in request

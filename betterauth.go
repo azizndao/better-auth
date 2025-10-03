@@ -8,7 +8,6 @@ import (
 
 	"better-auth/internal/auth"
 	"better-auth/internal/config"
-	"better-auth/pkg/middleware"
 	"better-auth/pkg/plugins/core"
 
 	"github.com/google/uuid"
@@ -39,11 +38,6 @@ func (ba *BetterAuth) Handler() http.Handler {
 	return ba.core
 }
 
-// Middleware returns the middleware manager
-func (ba *BetterAuth) Middleware() *middleware.Middleware {
-	return middleware.New(ba.core.Middleware())
-}
-
 // GetUser retrieves a user by ID
 func (ba *BetterAuth) GetUser(ctx context.Context, userID uuid.UUID) (*User, error) {
 	return ba.core.GetUser(ctx, userID)
@@ -54,23 +48,14 @@ func (ba *BetterAuth) GetUserByEmail(ctx context.Context, email string) (*User, 
 	return ba.core.GetUserByEmail(ctx, email)
 }
 
-// ValidateJWT validates a JWT token and returns claims
-func (ba *BetterAuth) ValidateJWT(tokenString string) (*auth.JWTClaims, error) {
-	return ba.core.ValidateJWT(tokenString)
-}
-
-// GenerateJWT generates a JWT token for a user
-func (ba *BetterAuth) GenerateJWT(user *User) (string, error) {
-	return ba.core.GenerateJWT(user)
-}
-
 // CreateSession creates a new session for a user
 func (ba *BetterAuth) CreateSession(
 	ctx context.Context,
 	userID uuid.UUID,
 	ipAddress, userAgent string,
+	tx *gorm.DB,
 ) (*Session, error) {
-	return ba.core.CreateSession(ctx, userID, ipAddress, userAgent)
+	return ba.core.CreateSession(ctx, userID, ipAddress, userAgent, tx)
 }
 
 // ValidateSession validates a session token

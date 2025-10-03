@@ -17,3 +17,11 @@ type Model struct {
 func NewModelFromID(id uuid.UUID) (*Model, error) {
 	return &Model{ID: id}, nil
 }
+
+func (m *Model) BeforeCreate(tx *gorm.DB) (err error) {
+	m.ID, err = uuid.NewV7()
+	if err != nil {
+		return err
+	}
+	return nil
+}

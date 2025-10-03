@@ -1,20 +1,16 @@
 package auth
 
 import (
-	"errors"
-	"fmt"
+	"database/sql"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
 	"better-auth/internal/models"
-	"better-auth/pkg/plugins/core"
 	"better-auth/pkg/router"
 	"better-auth/pkg/transport"
 
-	"github.com/google/uuid"
-	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 // handlers contains all HTTP handlers
@@ -42,101 +38,73 @@ func (h *handlers) registerRoutes(r router.RouteGroup) {
 func (h *handlers) signUp(w http.ResponseWriter, r *http.Request) {
 	var req models.SignUpPayload
 	if err := h.DecodeJSON(r, &req); err != nil {
-		var validationErr *transport.ValidationError
-		if errors.As(err, &validationErr) {
-			h.RespondValidationError(w, validationErr)
-		} else {
-			h.RespondError(w, http.StatusBadRequest, "Invalid JSON")
-		}
-		return
-	}
-
-	if req.Email == "" || req.Password == "" {
-		h.RespondError(w, http.StatusBadRequest, "Email and password are required")
-		return
-	}
-
-	if err := validateEmail(req.Email); err != nil {
-		h.RespondError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	if err := validatePassword(req.Password); err != nil {
-		h.RespondError(w, http.StatusBadRequest, err.Error())
+		h.RespondError(w, err)
 		return
 	}
 
 	existingUser, _ := h.core.GetUserByEmail(r.Context(), req.Email)
 	if existingUser != nil {
-		h.RespondError(w, http.StatusConflict, "User already exists")
+		h.RespondError(w, transport.NewAPIError(http.StatusConflict, "User already exists", nil))
 		return
 	}
 
-	now := time.Now()
 	user := &models.User{
-		Model:         core.Model{ID: uuid.New(), CreatedAt: now, UpdatedAt: now},
 		Email:         req.Email,
-		FirstName:     req.FirstName,
 		LastName:      req.LastName,
-		Password:      req.Password,
 		EmailVerified: false,
 		Metadata:      req.Metadata,
 	}
 
-	if err := h.core.database.WithContext(r.Context()).Create(user).Error; err != nil {
-		h.RespondError(w, http.StatusInternalServerError, "Failed to create user")
-		return
+	if req.FirstName != nil {
+		user.FirstName = sql.NullString{String: *req.FirstName, Valid: true}
 	}
 
-	session, err := h.core.session.CreateSession(
-		r.Context(),
-		user.ID,
-		getClientIP(r),
-		r.UserAgent(),
-	)
-	if err != nil {
-		h.RespondError(w, http.StatusInternalServerError, "Failed to create session")
-		return
-	}
+	ctx := r.Context()
 
-	h.core.session.SetSessionCookie(w, session.Token)
+	_ = h.core.database.Transaction(func(tx *gorm.DB) error {
+		err := gorm.G[models.User](tx).Create(ctx, user)
+		if err != nil {
+			h.RespondError(w, transport.NewAPIError(http.StatusInternalServerError, "Failed to create user", err))
+			return err
+		}
 
-	h.RespondJSON(w, http.StatusCreated, models.AuthResponse{
-		User:    user,
-		Session: session,
+		session, err := h.core.session.CreateSession(
+			ctx,
+			user.ID,
+			getClientIP(r),
+			r.UserAgent(),
+			tx,
+		)
+		if err != nil {
+			h.RespondError(w, transport.NewAPIError(http.StatusInternalServerError, "Failed to create session", err))
+			return err
+		}
+
+		h.core.session.SetSessionCookie(w, session.Token)
+
+		h.RespondJSON(w, http.StatusCreated, models.AuthResponse{
+			User:    user,
+			Session: session,
+		})
+		return nil
 	})
 }
 
 func (h *handlers) signIn(w http.ResponseWriter, r *http.Request) {
 	var req models.SignInPayload
 	if err := h.DecodeJSON(r, &req); err != nil {
-		var validationErr *transport.ValidationError
-		if errors.As(err, &validationErr) {
-			h.RespondValidationError(w, validationErr)
-		} else {
-			h.RespondError(w, http.StatusBadRequest, "Invalid JSON")
-		}
-		return
-	}
-
-	if req.Email == "" || req.Password == "" {
-		h.RespondError(w, http.StatusBadRequest, "Email and password are required")
+		h.RespondError(w, err)
 		return
 	}
 
 	user, err := h.core.GetUserByEmail(r.Context(), req.Email)
-	if err != nil {
-		h.RespondError(w, http.StatusUnauthorized, "Invalid credentials")
+	if err != nil || user.BannedUtil.Time.After(time.Now()) {
+		h.RespondError(w, transport.NewUnauthorizedError("Invalid credentials", err))
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
-		h.RespondError(w, http.StatusUnauthorized, "Invalid credentials")
-		return
-	}
-
-	if user.BannedUtil.Time.After(time.Now()) {
-		h.RespondError(w, http.StatusLocked, "User is banned")
+	if err := user.CheckPassword(req.Password); err != nil {
+		h.RespondError(w, transport.NewUnauthorizedError("Invalid credentials", err))
 		return
 	}
 
@@ -145,9 +113,10 @@ func (h *handlers) signIn(w http.ResponseWriter, r *http.Request) {
 		user.ID,
 		getClientIP(r),
 		r.UserAgent(),
+		nil,
 	)
 	if err != nil {
-		h.RespondError(w, http.StatusInternalServerError, "Failed to create session")
+		h.RespondError(w, transport.NewInternalServerError("Failed to create session", err))
 		return
 	}
 
@@ -163,12 +132,12 @@ func (h *handlers) signIn(w http.ResponseWriter, r *http.Request) {
 func (h *handlers) signOut(w http.ResponseWriter, r *http.Request) {
 	token := h.core.session.GetSessionFromRequest(r)
 	if token == "" {
-		h.RespondError(w, http.StatusBadRequest, "No session token provided")
+		h.RespondError(w, transport.NewBadRequestError("No session token provided", nil))
 		return
 	}
 
 	if err := h.core.session.DeleteSession(r.Context(), token); err != nil {
-		h.RespondError(w, http.StatusInternalServerError, "Failed to delete session")
+		h.RespondError(w, transport.NewInternalServerError("Failed to delete session", err))
 		return
 	}
 
@@ -179,25 +148,24 @@ func (h *handlers) signOut(w http.ResponseWriter, r *http.Request) {
 func (h *handlers) GetSession(w http.ResponseWriter, r *http.Request) {
 	token := h.core.session.GetSessionFromRequest(r)
 	if token == "" {
-		h.RespondError(w, http.StatusUnauthorized, "No session token provided")
+		h.RespondError(w, transport.NewUnauthorizedError("No session token provided", nil))
 		return
 	}
 
 	session, err := h.core.session.ValidateSession(r.Context(), token)
 	if err != nil {
-		h.RespondError(w, http.StatusUnauthorized, "Invalid session")
+		h.RespondError(w, transport.NewUnauthorizedError("Invalid session", err))
 		return
 	}
 
 	user, err := h.core.GetUser(r.Context(), session.UserID)
 	if err != nil {
-		h.RespondError(w, http.StatusInternalServerError, "Failed to get user")
+		h.RespondError(w, transport.NewInternalServerError("Failed to get user", err))
 		return
 	}
 
 	// Create a copy of the user for the response to avoid modifying the stored user
 	responseUser := *user
-	responseUser.Password = ""
 	h.RespondJSON(w, http.StatusOK, models.SessionResponse{
 		User:    &responseUser,
 		Session: session,
@@ -207,17 +175,7 @@ func (h *handlers) GetSession(w http.ResponseWriter, r *http.Request) {
 func (h *handlers) resetPassword(w http.ResponseWriter, r *http.Request) {
 	var req models.ResetPasswordPayload
 	if err := h.DecodeJSON(r, &req); err != nil {
-		var validationErr *transport.ValidationError
-		if errors.As(err, &validationErr) {
-			h.RespondValidationError(w, validationErr)
-		} else {
-			h.RespondError(w, http.StatusBadRequest, "Invalid JSON")
-		}
-		return
-	}
-
-	if req.Email == "" {
-		h.RespondError(w, http.StatusBadRequest, "Email is required")
+		h.RespondError(w, err)
 		return
 	}
 
@@ -228,63 +186,12 @@ func (h *handlers) resetPassword(w http.ResponseWriter, r *http.Request) {
 func (h *handlers) verifyEmail(w http.ResponseWriter, r *http.Request) {
 	var req models.VerifyEmailPayload
 	if err := h.DecodeJSON(r, &req); err != nil {
-		var validationErr *transport.ValidationError
-		if errors.As(err, &validationErr) {
-			h.RespondValidationError(w, validationErr)
-		} else {
-			h.RespondError(w, http.StatusBadRequest, "Invalid JSON")
-		}
-		return
-	}
-
-	if req.Token == "" {
-		h.RespondError(w, http.StatusBadRequest, "Token is required")
+		h.RespondError(w, err)
 		return
 	}
 
 	// TODO: Implement email verification logic
 	h.RespondJSON(w, http.StatusOK, map[string]string{"message": "Email verified successfully"})
-}
-
-func (h *handlers) SetupTwoFactor(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement 2FA setup
-	h.RespondError(w, http.StatusNotImplemented, "Two-factor setup not implemented")
-}
-
-func (h *handlers) VerifyTwoFactor(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement 2FA verification
-	h.RespondError(w, http.StatusNotImplemented, "Two-factor verification not implemented")
-}
-
-func (h *handlers) OAuthRedirect(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement OAuth redirect
-	h.RespondError(w, http.StatusNotImplemented, "OAuth redirect not implemented")
-}
-
-func (h *handlers) OAuthCallback(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement OAuth callback
-	h.RespondError(w, http.StatusNotImplemented, "OAuth callback not implemented")
-}
-
-// Validation functions
-func validateEmail(email string) error {
-	if email == "" {
-		return fmt.Errorf("email is required")
-	}
-
-	emailRegex := regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
-	if !emailRegex.MatchString(email) {
-		return fmt.Errorf("invalid email format")
-	}
-
-	return nil
-}
-
-func validatePassword(password string) error {
-	if len(password) < 8 {
-		return fmt.Errorf("password must be at least 8 characters long")
-	}
-	return nil
 }
 
 // Helper function to get client IP

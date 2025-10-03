@@ -13,7 +13,7 @@ func MigrateCoreModels(db *gorm.DB, plugins []core.Plugin) error {
 	allModels := []any{
 		&models.User{},
 		&models.Session{},
-		&models.OAuthAccount{},
+		&models.Account{},
 	}
 
 	// Get all enabled plugins and their models

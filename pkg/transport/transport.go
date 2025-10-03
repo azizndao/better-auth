@@ -8,10 +8,11 @@ import (
 func NewDefault() Transport {
 	validate := validator.New()
 	translators := initializeTranslators(validate)
-	
+
 	return &Default{
 		validator:   validate,
 		translators: translators,
 		uni:         nil, // Not needed after initialization
 	}
 }
+

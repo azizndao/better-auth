@@ -1,30 +1,18 @@
 package transport
 
 import (
-	"fmt"
+	"errors"
 	"net/http"
-
-	"better-auth/internal/models"
 )
 
 // RespondError sends a simple error response
-func (t *Default) RespondError(w http.ResponseWriter, status int, message string) {
-	t.RespondJSON(w, status, map[string]string{"error": message})
-}
-
-// RespondValidationError sends a structured validation error response
-func (t *Default) RespondValidationError(w http.ResponseWriter, validationErr *ValidationError) {
-	response := models.ValidationErrorResponse{
-		Error:   "Validation Failed",
-		Code:    http.StatusBadRequest,
-		Type:    "validation_error",
-		Errors:  validationErr.Errors,
-		Message: fmt.Sprintf("Request validation failed with %d error(s)", len(validationErr.Errors)),
+func (t *Default) RespondError(w http.ResponseWriter, data error) {
+	var apiErr *APIError
+	if errors.As(data, &apiErr) {
+		t.RespondJSON(w, apiErr.Code, apiErr)
+		return
 	}
-	t.RespondJSON(w, http.StatusBadRequest, response)
+
+	t.RespondJSON(w, http.StatusInternalServerError, "Internal Server Error")
 }
 
-// WriteError is an alias for RespondError for backward compatibility
-func (t *Default) WriteError(w http.ResponseWriter, status int, message string) {
-	t.RespondError(w, status, message)
-}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"net/http"
@@ -49,7 +50,13 @@ func (s *SessionService) CreateSession(
 	ctx context.Context,
 	userID uuid.UUID,
 	ipAddress, userAgent string,
+	tx *gorm.DB,
 ) (*models.Session, error) {
+	db := s.db
+	if tx != nil {
+		db = tx
+	}
+
 	token, err := s.generateSecureToken()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate session token: %v", err)
@@ -66,7 +73,8 @@ func (s *SessionService) CreateSession(
 		Data:      make(map[string]any),
 	}
 
-	if err := s.db.WithContext(ctx).Create(session).Error; err != nil {
+	err = gorm.G[models.Session](db).Create(ctx, session)
+	if err != nil {
 		return nil, fmt.Errorf("failed to create session: %v", err)
 	}
 
@@ -268,7 +276,7 @@ func (s *SessionService) generateSecureToken() (string, error) {
 	if _, err := rand.Read(bytes); err != nil {
 		return "", err
 	}
-	return base64.URLEncoding.EncodeToString(bytes), nil
+	return hex.EncodeToString(bytes), nil
 }
 
 // IsValidToken checks if a token format is valid

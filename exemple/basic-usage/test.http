@@ -1,0 +1,22 @@
+### Sign up a new user
+
+POST http://localhost:8080/auth/signup HTTP/1.1
+Content-Type: application/json
+
+{
+  "email": "john.doe@example.com",
+  "firstName": "John",
+  "lastName": "Doe",
+  "password": "SecurePassword123!"
+}
+
+
+### Sign in
+
+POST http://localhost:8080/auth/signin HTTP/1.1
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "SecurePassword123!"
+}

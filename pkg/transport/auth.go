@@ -52,7 +52,7 @@ func (t *Default) SetCookie(w http.ResponseWriter, name, value string, maxAge in
 		MaxAge:   maxAge,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false, // Set to true in production with HTTPS
+		Secure:   true, // Set to true in production with HTTPS
 		SameSite: http.SameSiteLaxMode,
 	}
 	http.SetCookie(w, cookie)
@@ -66,4 +66,3 @@ func (t *Default) GetCookie(req *http.Request, name string) (string, error) {
 	}
 	return cookie.Value, nil
 }
-

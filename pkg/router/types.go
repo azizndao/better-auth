@@ -5,37 +5,13 @@ import (
 	"net/http"
 )
 
-// Router interface defines the main routing functionality
 type Router interface {
-	// HTTP method routing with modern net/http patterns
-	GET(pattern string, handler http.HandlerFunc, middleware ...Middleware)
-	POST(pattern string, handler http.HandlerFunc, middleware ...Middleware)
-	PUT(pattern string, handler http.HandlerFunc, middleware ...Middleware)
-	PATCH(pattern string, handler http.HandlerFunc, middleware ...Middleware)
-	DELETE(pattern string, handler http.HandlerFunc, middleware ...Middleware)
-	OPTIONS(pattern string, handler http.HandlerFunc, middleware ...Middleware)
-	HEAD(pattern string, handler http.HandlerFunc, middleware ...Middleware)
-	
-	// Advanced routing methods
-	Handle(method, pattern string, handler http.HandlerFunc, middleware ...Middleware)
-	HandleFunc(pattern string, handler http.HandlerFunc, middleware ...Middleware)
-	
-	// Route groups for organizing related routes
-	Group(prefix string, middleware ...Middleware) RouteGroup
-	
-	// Middleware management
-	Use(middleware ...Middleware)
-	
-	// Static file serving with modern features
-	Static(pattern, dir string)
-	StaticFile(pattern, file string)
-	
-	// Server integration
+	RouteGroup
+
 	ServeHTTP(w http.ResponseWriter, r *http.Request)
 	Handler() http.Handler
 }
 
-// RouteGroup interface for grouped routes
 type RouteGroup interface {
 	// HTTP method routing within the group
 	GET(pattern string, handler http.HandlerFunc, middleware ...Middleware)
@@ -45,30 +21,28 @@ type RouteGroup interface {
 	DELETE(pattern string, handler http.HandlerFunc, middleware ...Middleware)
 	OPTIONS(pattern string, handler http.HandlerFunc, middleware ...Middleware)
 	HEAD(pattern string, handler http.HandlerFunc, middleware ...Middleware)
-	
+
 	// Advanced routing within the group
 	Handle(method, pattern string, handler http.HandlerFunc, middleware ...Middleware)
-	HandleFunc(pattern string, handler http.HandlerFunc, middleware ...Middleware)
-	
+
 	// Nested groups
 	Group(prefix string, middleware ...Middleware) RouteGroup
-	
+
 	// Group middleware
 	Use(middleware ...Middleware)
 }
 
-// Middleware defines the middleware function signature
 type Middleware func(http.Handler) http.Handler
 
 // HandlerContext provides additional context for handlers
 type HandlerContext struct {
 	// Route parameters extracted from URL path
 	Params map[string]string
-	
+
 	// Original request and response writer
 	Request  *http.Request
 	Response http.ResponseWriter
-	
+
 	// User-defined values
 	Values map[string]any
 }
@@ -79,7 +53,7 @@ type ContextKey string
 const (
 	// ParamsContextKey is the key for storing route parameters in request context
 	ParamsContextKey ContextKey = "router.params"
-	
+
 	// ValuesContextKey is the key for storing custom values in request context
 	ValuesContextKey ContextKey = "router.values"
 )
@@ -94,43 +68,20 @@ type RouteInfo struct {
 	Description string
 }
 
-// RouterOptions contains configuration options for the router
 type RouterOptions struct {
-	// Enable automatic OPTIONS responses for CORS
 	AutoOPTIONS bool
-	
-	// Enable automatic HEAD responses from GET handlers
-	AutoHEAD bool
-	
-	// Enable trailing slash redirect
-	TrailingSlashRedirect bool
-	
-	// Enable method not allowed responses
-	MethodNotAllowed bool
-	
-	// Custom not found handler
-	NotFoundHandler http.Handler
-	
-	// Custom method not allowed handler
-	MethodNotAllowedHandler http.Handler
-	
-	// Enable request logging
-	EnableLogging bool
-	
-	// Enable panic recovery
-	EnableRecovery bool
-}
 
-// DefaultRouterOptions returns sensible default options
-func DefaultRouterOptions() RouterOptions {
-	return RouterOptions{
-		AutoOPTIONS:           true,
-		AutoHEAD:             true,
-		TrailingSlashRedirect: true,
-		MethodNotAllowed:      true,
-		EnableLogging:         false,
-		EnableRecovery:        true,
-	}
+	AutoHEAD bool
+
+	TrailingSlashRedirect bool
+
+	MethodNotAllowed bool
+
+	NotFoundHandler http.Handler
+
+	MethodNotAllowedHandler http.Handler
+
+	EnableLogging bool
 }
 
 // PathParams extracts path parameters from request context
@@ -154,7 +105,7 @@ func SetPathParam(r *http.Request, key, value string) *http.Request {
 		params = make(map[string]string)
 	}
 	params[key] = value
-	
+
 	ctx := context.WithValue(r.Context(), ParamsContextKey, params)
 	return r.WithContext(ctx)
 }
@@ -180,7 +131,7 @@ func SetValue(r *http.Request, key string, value any) *http.Request {
 		values = make(map[string]any)
 	}
 	values[key] = value
-	
+
 	ctx := context.WithValue(r.Context(), ValuesContextKey, values)
 	return r.WithContext(ctx)
 }

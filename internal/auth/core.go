@@ -20,11 +20,9 @@ import (
 type AuthCore struct {
 	config     *config.Config
 	database   *gorm.DB
-	plugins    []core.Plugin // List of plugins for extensibility
+	plugins    []core.Plugin
 	transport  transport.Transport
 	router     router.Router
-	jwt        *JWTService
-	oauth      *OAuthService
 	session    *SessionService
 	middleware *AuthMiddleware
 }
@@ -40,9 +38,7 @@ func New(cfg *config.Config, db *gorm.DB, plugins []core.Plugin) (*AuthCore, err
 		AutoOPTIONS:           true,
 		AutoHEAD:              true,
 		TrailingSlashRedirect: false, // Don't redirect for auth endpoints
-		MethodNotAllowed:      true,
 		EnableLogging:         false, // We'll handle logging separately
-		EnableRecovery:        true,
 	}
 
 	auth := &AuthCore{
@@ -51,7 +47,10 @@ func New(cfg *config.Config, db *gorm.DB, plugins []core.Plugin) (*AuthCore, err
 		plugins:   plugins,
 		router:    router.NewRouterWithOptions(routerOptions),
 		transport: transport.NewDefault(),
+		session:   NewSessionService(db, SessionOptions{}),
 	}
+
+	db.AutoMigrate(models.User{}, models.Session{}, models.Organization{}, models.Account{})
 
 	auth.registerRoutes()
 
@@ -61,7 +60,7 @@ func New(cfg *config.Config, db *gorm.DB, plugins []core.Plugin) (*AuthCore, err
 		}
 
 		// Initialize plugin with the database
-		if err := p.Initialize(context.Background(), db); err != nil {
+		if err := p.Init(context.Background(), db); err != nil {
 			return nil, fmt.Errorf("failed to initialize plugin %s: %w", p.Name(), err)
 		}
 
@@ -87,34 +86,29 @@ func (c *AuthCore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c.router.ServeHTTP(w, r)
 }
 
-// SetTransport sets a custom transport
 func (c *AuthCore) SetTransport(t transport.Transport) {
 	c.transport = t
 }
 
-// GetTransport returns the current transport
 func (c *AuthCore) GetTransport() transport.Transport {
 	return c.transport
 }
 
-// GetTransportInterface returns the transport as any for plugin system
 func (c *AuthCore) GetTransportInterface() any {
 	return c.transport
 }
 
-// GetGormDB returns the GORM database instance
 func (c *AuthCore) GetGormDB() *gorm.DB {
 	return c.database
 }
 
-// GetConfig returns the configuration
 func (c *AuthCore) GetConfig() *config.Config {
 	return c.config
 }
 
 func (c *AuthCore) registerRoutes() {
 	// Create route group with the configured prefix
-	authGroup := c.router.Group(c.config.PathPrefix)
+	authGroup := c.router
 
 	// Add CORS middleware if configured
 	if c.config.CORSConfig != nil {
@@ -123,7 +117,7 @@ func (c *AuthCore) registerRoutes() {
 			AllowedMethods:   c.config.CORSConfig.AllowedMethods,
 			AllowedHeaders:   c.config.CORSConfig.AllowedHeaders,
 			AllowCredentials: c.config.CORSConfig.AllowCredentials,
-			MaxAge:           24 * time.Hour, // Default 24 hours
+			MaxAge:           24 * time.Hour,
 		}
 		authGroup.Use(router.CORS(corsOptions))
 	}
@@ -136,11 +130,10 @@ func (c *AuthCore) applyRateLimit(_ http.ResponseWriter, r *http.Request) *http.
 	if !c.config.RateLimitEnabled {
 		return r
 	}
-	// Rate limiting logic would be implemented here
+	// TODO: Rate limiting logic would be implemented here
 	return r
 }
 
-// GetUser retrieves a user by ID
 func (c *AuthCore) GetUser(ctx context.Context, userID uuid.UUID) (*models.User, error) {
 	var user models.User
 	if err := c.database.WithContext(ctx).First(&user, "id = ?", userID).Error; err != nil {
@@ -149,7 +142,6 @@ func (c *AuthCore) GetUser(ctx context.Context, userID uuid.UUID) (*models.User,
 	return &user, nil
 }
 
-// GetUserByEmail retrieves a user by email
 func (c *AuthCore) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
 	var user models.User
 	if err := c.database.WithContext(ctx).First(&user, "email = ?", email).Error; err != nil {
@@ -158,36 +150,23 @@ func (c *AuthCore) GetUserByEmail(ctx context.Context, email string) (*models.Us
 	return &user, nil
 }
 
-// ValidateJWT validates a JWT token and returns claims
-func (c *AuthCore) ValidateJWT(tokenString string) (*JWTClaims, error) {
-	return c.jwt.ValidateToken(tokenString)
-}
-
-// GenerateJWT generates a JWT token for a user
-func (c *AuthCore) GenerateJWT(user *models.User) (string, error) {
-	return c.jwt.GenerateToken(user)
-}
-
-// CreateSession creates a new session for a user
 func (c *AuthCore) CreateSession(
 	ctx context.Context,
 	userID uuid.UUID,
 	ipAddress, userAgent string,
+	tx *gorm.DB,
 ) (*models.Session, error) {
-	return c.session.CreateSession(ctx, userID, ipAddress, userAgent)
+	return c.session.CreateSession(ctx, userID, ipAddress, userAgent, tx)
 }
 
-// ValidateSession validates a session token
 func (c *AuthCore) ValidateSession(ctx context.Context, token string) (*models.Session, error) {
 	return c.session.ValidateSession(ctx, token)
 }
 
-// DeleteSession deletes a session
 func (c *AuthCore) DeleteSession(ctx context.Context, token string) error {
 	return c.session.DeleteSession(ctx, token)
 }
 
-// Middleware returns the middleware manager
 func (c *AuthCore) Middleware() *AuthMiddleware {
 	return c.middleware
 }
