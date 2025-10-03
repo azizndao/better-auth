@@ -4,15 +4,21 @@ import (
 	"net/http"
 	"strings"
 
-	"better-auth/internal/models"
-
 	"github.com/go-playground/validator/v10"
 )
+
+// ValidationError represents a single field validation error
+type ValidationError struct {
+	Field   string `json:"field"`
+	Message string `json:"message"`
+	Tag     string `json:"tag"`
+	Value   any    `json:"value,omitempty"`
+}
 
 // buildValidationError converts validator errors to structured ValidationError
 func (t *Default) buildValidationError(validationErrors validator.ValidationErrors, locale string) *APIError {
 	translator := t.getTranslator(locale)
-	errors := make([]models.ValidationError, 0, len(validationErrors))
+	errors := make([]ValidationError, 0, len(validationErrors))
 
 	for _, fieldError := range validationErrors {
 		errorValue := fieldError.Value()
@@ -22,7 +28,7 @@ func (t *Default) buildValidationError(validationErrors validator.ValidationErro
 			errorValue = "[hidden]"
 		}
 
-		errors = append(errors, models.ValidationError{
+		errors = append(errors, ValidationError{
 			Field:   fieldError.Field(),
 			Message: fieldError.Translate(translator),
 			Tag:     fieldError.Tag(),
@@ -50,4 +56,3 @@ func (t *Default) isSensitiveField(fieldName string) bool {
 
 	return false
 }
-

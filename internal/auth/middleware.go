@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"better-auth/internal/dto"
 	"better-auth/internal/models"
 	"better-auth/pkg/plugins/core"
 	"better-auth/pkg/transport"
@@ -51,8 +52,8 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 		}
 
 		// Add user to request context using transport
-		userCtx := &models.AuthData{User: user}
-		r = m.SetUserContext(r, userCtx)
+		userCtx := &dto.AuthData{User: dto.NewUser(*user)}
+		r = SetUserContext(r, userCtx)
 		next.ServeHTTP(w, r)
 	})
 }
@@ -64,8 +65,8 @@ func (m *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 
 		// Add user to request context using transport (can be nil)
 		if user != nil {
-			userCtx := &models.AuthData{User: user}
-			r = m.SetUserContext(r, userCtx)
+			userCtx := &dto.AuthData{User: dto.NewUser(*user)}
+			r = SetUserContext(r, userCtx)
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -177,8 +178,21 @@ func (m *AuthMiddleware) shouldSkipPath(path string) bool {
 	return false
 }
 
-// GetUserFromContext extracts user from request context
-func GetUserFromContext(ctx context.Context) (*models.User, bool) {
-	user, ok := ctx.Value("user").(*models.User)
-	return user, ok
+type contextKey string
+
+const UserContextKey contextKey = "betterauth.user"
+
+// GetUserContext retrieves user context from the request
+func GetUserContext(req *http.Request) (*dto.AuthData, bool) {
+	ctx := req.Context().Value(UserContextKey)
+	if ctx == nil {
+		return nil, false
+	}
+	userCtx, ok := ctx.(*dto.AuthData)
+	return userCtx, ok
+}
+
+// SetUserContext sets user context in the request
+func SetUserContext(req *http.Request, ctx *dto.AuthData) *http.Request {
+	return req.WithContext(context.WithValue(req.Context(), UserContextKey, ctx))
 }

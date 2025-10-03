@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"better-auth/internal/dto"
 	"better-auth/internal/models"
 	"better-auth/pkg/router"
 	"better-auth/pkg/transport"
@@ -36,7 +37,7 @@ func (h *handlers) registerRoutes(r router.RouteGroup) {
 }
 
 func (h *handlers) signUp(w http.ResponseWriter, r *http.Request) {
-	var req models.SignUpPayload
+	var req dto.SignUpPayload
 	if err := h.DecodeJSON(r, &req); err != nil {
 		h.RespondError(w, err)
 		return
@@ -82,16 +83,13 @@ func (h *handlers) signUp(w http.ResponseWriter, r *http.Request) {
 
 		h.core.session.SetSessionCookie(w, session.Token)
 
-		h.RespondJSON(w, http.StatusCreated, models.AuthResponse{
-			User:    user,
-			Session: session,
-		})
+		h.RespondJSON(w, http.StatusCreated, dto.NewAuthResponse(*user, *session))
 		return nil
 	})
 }
 
 func (h *handlers) signIn(w http.ResponseWriter, r *http.Request) {
-	var req models.SignInPayload
+	var req dto.SignInPayload
 	if err := h.DecodeJSON(r, &req); err != nil {
 		h.RespondError(w, err)
 		return
@@ -123,10 +121,7 @@ func (h *handlers) signIn(w http.ResponseWriter, r *http.Request) {
 	h.core.session.SetSessionCookie(w, session.Token)
 
 	// Create a copy of the user for the response to avoid modifying the stored user
-	h.RespondJSON(w, http.StatusOK, models.AuthResponse{
-		User:    user,
-		Session: session,
-	})
+	h.RespondJSON(w, http.StatusOK, dto.NewAuthResponse(*user, *session))
 }
 
 func (h *handlers) signOut(w http.ResponseWriter, r *http.Request) {
@@ -164,16 +159,11 @@ func (h *handlers) GetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create a copy of the user for the response to avoid modifying the stored user
-	responseUser := *user
-	h.RespondJSON(w, http.StatusOK, models.SessionResponse{
-		User:    &responseUser,
-		Session: session,
-	})
+	h.RespondJSON(w, http.StatusOK, dto.NewSessionResponse(*user, *session))
 }
 
 func (h *handlers) resetPassword(w http.ResponseWriter, r *http.Request) {
-	var req models.ResetPasswordPayload
+	var req dto.ResetPasswordPayload
 	if err := h.DecodeJSON(r, &req); err != nil {
 		h.RespondError(w, err)
 		return
@@ -184,7 +174,7 @@ func (h *handlers) resetPassword(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlers) verifyEmail(w http.ResponseWriter, r *http.Request) {
-	var req models.VerifyEmailPayload
+	var req dto.VerifyEmailPayload
 	if err := h.DecodeJSON(r, &req); err != nil {
 		h.RespondError(w, err)
 		return

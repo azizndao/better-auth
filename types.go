@@ -3,6 +3,7 @@ package betterauth
 import (
 	"better-auth/internal/auth"
 	"better-auth/internal/config"
+	"better-auth/internal/dto"
 	"better-auth/pkg/plugins/core"
 	"better-auth/pkg/transport"
 )
@@ -13,18 +14,16 @@ type BetterAuth struct {
 
 type Config = config.Config
 
-type User = auth.User
+type User = dto.User
 
-type Session = auth.Session
+type Session = dto.Session
 
-type Organization = auth.Organization
-
-type UserContext = auth.UserContext
+type UserContext = dto.AuthData
 
 type Plugin = core.Plugin
 
 type Transport = transport.Transport
 
-type SignInPayload = auth.SignInRequest
+type SignInPayload = dto.SignInPayload
 
-type SignUpPayload = auth.SignUpRequest
+type SignUpPayload = dto.SignUpPayload

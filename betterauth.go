@@ -8,6 +8,7 @@ import (
 
 	"better-auth/internal/auth"
 	"better-auth/internal/config"
+	"better-auth/internal/models"
 	"better-auth/pkg/plugins/core"
 
 	"github.com/google/uuid"
@@ -39,12 +40,12 @@ func (ba *BetterAuth) Handler() http.Handler {
 }
 
 // GetUser retrieves a user by ID
-func (ba *BetterAuth) GetUser(ctx context.Context, userID uuid.UUID) (*User, error) {
+func (ba *BetterAuth) GetUser(ctx context.Context, userID uuid.UUID) (*models.User, error) {
 	return ba.core.GetUser(ctx, userID)
 }
 
 // GetUserByEmail retrieves a user by email
-func (ba *BetterAuth) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+func (ba *BetterAuth) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
 	return ba.core.GetUserByEmail(ctx, email)
 }
 
@@ -54,12 +55,12 @@ func (ba *BetterAuth) CreateSession(
 	userID uuid.UUID,
 	ipAddress, userAgent string,
 	tx *gorm.DB,
-) (*Session, error) {
+) (*models.Session, error) {
 	return ba.core.CreateSession(ctx, userID, ipAddress, userAgent, tx)
 }
 
 // ValidateSession validates a session token
-func (ba *BetterAuth) ValidateSession(ctx context.Context, token string) (*Session, error) {
+func (ba *BetterAuth) ValidateSession(ctx context.Context, token string) (*models.Session, error) {
 	return ba.core.ValidateSession(ctx, token)
 }
 

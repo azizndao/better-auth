@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"net/http"
 
-	"better-auth/internal/models"
-
 	ut "github.com/go-playground/universal-translator"
 	"github.com/go-playground/validator/v10"
 )
@@ -43,10 +41,6 @@ type Transport interface {
 	// Error responses
 	RespondError(w http.ResponseWriter, data error)
 
-	// User context operations
-	GetUserContext(req *http.Request) (*models.AuthData, bool)
-	SetUserContext(req *http.Request, ctx *models.AuthData) *http.Request
-
 	// Token operations
 	ExtractToken(req *http.Request) string
 
@@ -61,8 +55,6 @@ type Default struct {
 	translators map[string]ut.Translator
 	uni         *ut.UniversalTranslator
 }
-
-type contextKey string
 
 type APIError struct {
 	internal error `json:"-"`
