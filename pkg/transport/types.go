@@ -1,9 +1,9 @@
 package transport
 
 import (
-	"fmt"
 	"net/http"
 
+	"github.com/azizndao/grouter"
 	ut "github.com/go-playground/universal-translator"
 	"github.com/go-playground/validator/v10"
 )
@@ -35,18 +35,10 @@ const (
 // Transport interface defines how requests and responses are handled
 type Transport interface {
 	// JSON operations
-	DecodeJSON(req *http.Request, v any) error
-	RespondJSON(w http.ResponseWriter, status int, data any)
-
-	// Error responses
-	RespondError(w http.ResponseWriter, data error)
+	DecodeJSON(req *grouter.Ctx, v any) error
 
 	// Token operations
 	ExtractToken(req *http.Request) string
-
-	// Cookie operations
-	SetCookie(w http.ResponseWriter, name, value string, maxAge int)
-	GetCookie(req *http.Request, name string) (string, error)
 }
 
 // Default implementation of the Transport interface
@@ -54,86 +46,4 @@ type Default struct {
 	validator   *validator.Validate
 	translators map[string]ut.Translator
 	uni         *ut.UniversalTranslator
-}
-
-type APIError struct {
-	internal error `json:"-"`
-	Code     int   `json:"code"`
-	Data     any   `json:"data"`
-}
-
-func NewAPIError(code int, data any, internal error) *APIError {
-	return &APIError{
-		Code:     code,
-		Data:     data,
-		internal: internal,
-	}
-}
-
-func (e *APIError) Error() string {
-	if e.internal != nil {
-		return e.internal.Error()
-	}
-
-	return fmt.Sprintf("API error: %d", e.Code)
-}
-
-func (e *APIError) Unwrap() error {
-	return e.internal
-}
-
-func NewBadRequestError(data any, err error) *APIError {
-	return &APIError{
-		Code:     http.StatusBadRequest,
-		Data:     data,
-		internal: err,
-	}
-}
-
-func NewUnauthorizedError(data any, err error) *APIError {
-	return &APIError{
-		Code:     http.StatusUnauthorized,
-		Data:     data,
-		internal: err,
-	}
-}
-
-func NewForbiddenError(data any, err error) *APIError {
-	return &APIError{
-		Code:     http.StatusForbidden,
-		Data:     data,
-		internal: err,
-	}
-}
-
-func NewNotFoundError(data any, err error) *APIError {
-	return &APIError{
-		Code:     http.StatusNotFound,
-		Data:     data,
-		internal: err,
-	}
-}
-
-func NewInternalServerError(data any, err error) *APIError {
-	return &APIError{
-		Code:     http.StatusInternalServerError,
-		Data:     data,
-		internal: err,
-	}
-}
-
-func NewConflictError(data any, err error) *APIError {
-	return &APIError{
-		Code:     http.StatusConflict,
-		Data:     data,
-		internal: err,
-	}
-}
-
-func NewValidationError(data any, err error) *APIError {
-	return &APIError{
-		Code:     http.StatusUnprocessableEntity,
-		Data:     data,
-		internal: err,
-	}
 }

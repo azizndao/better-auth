@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"better-auth/internal/dto"
 	"better-auth/internal/models"
@@ -36,28 +35,6 @@ func NewAuthMiddleware(config *MiddlewareConfig, transport transport.Transport, 
 	}
 }
 
-// RequireAuth middleware that requires authentication
-func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Check if path should be skipped
-		if m.shouldSkipPath(r.URL.Path) {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		user, err := m.authenticateRequest(r)
-		if err != nil {
-			m.RespondError(w, err)
-			return
-		}
-
-		// Add user to request context using transport
-		userCtx := &dto.AuthData{User: dto.NewUser(*user)}
-		r = SetUserContext(r, userCtx)
-		next.ServeHTTP(w, r)
-	})
-}
-
 // OptionalAuth middleware that optionally authenticates users
 func (m *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -70,81 +47,6 @@ func (m *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-// RateLimitMiddleware provides rate limiting
-func (m *AuthMiddleware) RateLimitMiddleware(
-	requestsPerMinute int,
-) func(http.Handler) http.Handler {
-	// Simple in-memory rate limiter (in production, use Redis or similar)
-	clients := make(map[string][]time.Time)
-
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			clientIP := getClientIP(r)
-			now := time.Now()
-
-			// Clean old entries
-			if requests, exists := clients[clientIP]; exists {
-				validRequests := []time.Time{}
-				for _, requestTime := range requests {
-					if now.Sub(requestTime) < time.Minute {
-						validRequests = append(validRequests, requestTime)
-					}
-				}
-				clients[clientIP] = validRequests
-			}
-
-			// Check rate limit
-			if len(clients[clientIP]) >= requestsPerMinute {
-				m.RespondError(w, transport.NewForbiddenError("Rate limit exceeded", nil))
-				return
-			}
-
-			// Add current request
-			clients[clientIP] = append(clients[clientIP], now)
-
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// CORSMiddleware provides CORS support
-func (m *AuthMiddleware) CORSMiddleware(
-	allowedOrigins []string,
-	allowedMethods []string,
-	allowedHeaders []string,
-) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			origin := r.Header.Get("Origin")
-
-			// Check if origin is allowed
-			allowed := false
-			for _, allowedOrigin := range allowedOrigins {
-				if allowedOrigin == "*" || allowedOrigin == origin {
-					allowed = true
-					break
-				}
-			}
-
-			if allowed {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-			}
-
-			w.Header().Set("Access-Control-Allow-Methods", strings.Join(allowedMethods, ", "))
-			w.Header().Set("Access-Control-Allow-Headers", strings.Join(allowedHeaders, ", "))
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-
-			// Handle preflight requests
-			if r.Method == "OPTIONS" {
-				w.WriteHeader(http.StatusOK)
-				return
-			}
-
-			next.ServeHTTP(w, r)
-		})
-	}
 }
 
 // authenticateRequest attempts to authenticate a request using available methods

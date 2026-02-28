@@ -1,9 +1,9 @@
 package transport
 
 import (
-	"net/http"
 	"strings"
 
+	"github.com/azizndao/grouter"
 	"github.com/go-playground/validator/v10"
 )
 
@@ -16,7 +16,7 @@ type ValidationError struct {
 }
 
 // buildValidationError converts validator errors to structured ValidationError
-func (t *Default) buildValidationError(validationErrors validator.ValidationErrors, locale string) *APIError {
+func (t *Default) buildValidationError(validationErrors validator.ValidationErrors, locale string) *grouter.Error {
 	translator := t.getTranslator(locale)
 	errors := make([]ValidationError, 0, len(validationErrors))
 
@@ -36,11 +36,7 @@ func (t *Default) buildValidationError(validationErrors validator.ValidationErro
 		})
 	}
 
-	return &APIError{
-		Code:     http.StatusUnprocessableEntity,
-		Data:     errors,
-		internal: nil,
-	}
+	return grouter.ErrorUnprocessableEntity(errors, nil)
 }
 
 // isSensitiveField checks if a field contains sensitive information

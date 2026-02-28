@@ -1,8 +1,9 @@
 module better-auth
 
-go 1.24.5
+go 1.25.1
 
 require (
+	github.com/azizndao/grouter v0.0.7
 	github.com/go-playground/locales v0.14.1
 	github.com/go-playground/universal-translator v0.18.1
 	github.com/go-playground/validator/v10 v10.27.0

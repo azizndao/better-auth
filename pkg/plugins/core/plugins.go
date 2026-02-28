@@ -4,8 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"better-auth/pkg/router"
-
+	"github.com/azizndao/grouter"
 	"gorm.io/gorm"
 )
 
@@ -13,7 +12,7 @@ type Plugin interface {
 	Name() string
 	Init(ctx context.Context, db *gorm.DB) error
 	GetModels() []any
-	RegisterRoutes(router router.RouteGroup) error
+	RegisterRoutes(router grouter.RouteGroup) error
 }
 
 type BasePlugin struct {
@@ -42,7 +41,7 @@ type PluginRegistry struct {
 }
 
 // NewPluginRegistry creates a new plugin registry
-func NewPluginRegistry(router router.Router, db *gorm.DB) *PluginRegistry {
+func NewPluginRegistry(router grouter.Router, db *gorm.DB) *PluginRegistry {
 	return &PluginRegistry{
 		plugins: make(map[string]Plugin),
 		db:      db,

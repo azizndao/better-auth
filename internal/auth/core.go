@@ -9,9 +9,9 @@ import (
 	"better-auth/internal/config"
 	"better-auth/internal/models"
 	"better-auth/pkg/plugins/core"
-	"better-auth/pkg/router"
 	"better-auth/pkg/transport"
 
+	"github.com/azizndao/grouter"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -22,7 +22,7 @@ type AuthCore struct {
 	database   *gorm.DB
 	plugins    []core.Plugin
 	transport  transport.Transport
-	router     router.Router
+	router     grouter.Router
 	session    *SessionService
 	middleware *AuthMiddleware
 }
@@ -34,7 +34,7 @@ func New(cfg *config.Config, db *gorm.DB, plugins []core.Plugin) (*AuthCore, err
 	}
 
 	// Create router with options suitable for auth
-	routerOptions := router.RouterOptions{
+	routerOptions := grouter.RouterOptions{
 		AutoOPTIONS:           true,
 		AutoHEAD:              true,
 		TrailingSlashRedirect: false, // Don't redirect for auth endpoints
@@ -45,7 +45,7 @@ func New(cfg *config.Config, db *gorm.DB, plugins []core.Plugin) (*AuthCore, err
 		config:    cfg,
 		database:  db,
 		plugins:   plugins,
-		router:    router.NewRouterWithOptions(routerOptions),
+		router:    grouter.NewRouterWithOptions(routerOptions),
 		transport: transport.NewDefault(),
 		session:   NewSessionService(db, SessionOptions{}),
 	}
@@ -112,14 +112,14 @@ func (c *AuthCore) registerRoutes() {
 
 	// Add CORS middleware if configured
 	if c.config.CORSConfig != nil {
-		corsOptions := router.CORSOptions{
+		corsOptions := grouter.CORSOptions{
 			AllowedOrigins:   c.config.CORSConfig.AllowedOrigins,
 			AllowedMethods:   c.config.CORSConfig.AllowedMethods,
 			AllowedHeaders:   c.config.CORSConfig.AllowedHeaders,
 			AllowCredentials: c.config.CORSConfig.AllowCredentials,
 			MaxAge:           24 * time.Hour,
 		}
-		authGroup.Use(router.CORS(corsOptions))
+		authGroup.Use(grouter.CORS(corsOptions))
 	}
 
 	handler := newHandlers(c)

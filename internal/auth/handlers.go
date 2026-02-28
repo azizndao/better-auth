@@ -2,15 +2,15 @@ package auth
 
 import (
 	"database/sql"
-	"net/http"
-	"strings"
+	"errors"
+	"fmt"
 	"time"
 
 	"better-auth/internal/dto"
 	"better-auth/internal/models"
-	"better-auth/pkg/router"
 	"better-auth/pkg/transport"
 
+	"github.com/azizndao/grouter"
 	"gorm.io/gorm"
 )
 
@@ -25,28 +25,24 @@ func newHandlers(core *AuthCore) *handlers {
 	return &handlers{core: core, Transport: core.transport}
 }
 
-func (h *handlers) registerRoutes(r router.RouteGroup) {
-	authGroup := r.Group("/auth")
-
-	authGroup.POST("/signup", h.signUp)
-	authGroup.POST("/signin", h.signIn)
-	authGroup.POST("/signout", h.signOut)
-	authGroup.GET("/session", h.GetSession)
-	authGroup.POST("/reset-password", h.resetPassword)
-	authGroup.POST("/verify-email", h.verifyEmail)
+func (h *handlers) registerRoutes(r grouter.RouteGroup) {
+	r.Post("/signup", h.signUp)
+	r.Post("/signin", h.signIn)
+	r.Post("/signout", h.signOut)
+	r.Get("/session", h.GetSession)
+	r.Post("/reset-password", h.resetPassword)
+	r.Post("/verify-email", h.verifyEmail)
 }
 
-func (h *handlers) signUp(w http.ResponseWriter, r *http.Request) {
+func (h *handlers) signUp(c *grouter.Ctx) error {
 	var req dto.SignUpPayload
-	if err := h.DecodeJSON(r, &req); err != nil {
-		h.RespondError(w, err)
-		return
+	if err := h.DecodeJSON(c, &req); err != nil {
+		return err
 	}
 
-	existingUser, _ := h.core.GetUserByEmail(r.Context(), req.Email)
+	existingUser, _ := h.core.GetUserByEmail(c.Context(), req.Email)
 	if existingUser != nil {
-		h.RespondError(w, transport.NewAPIError(http.StatusConflict, "User already exists", nil))
-		return
+		return grouter.ErrorConflict(nil, fmt.Errorf("user already exists"))
 	}
 
 	user := &models.User{
@@ -60,143 +56,115 @@ func (h *handlers) signUp(w http.ResponseWriter, r *http.Request) {
 		user.FirstName = sql.NullString{String: *req.FirstName, Valid: true}
 	}
 
-	ctx := r.Context()
+	ctx := c.Context()
 
-	_ = h.core.database.Transaction(func(tx *gorm.DB) error {
+	return h.core.database.Transaction(func(tx *gorm.DB) error {
 		err := gorm.G[models.User](tx).Create(ctx, user)
 		if err != nil {
-			h.RespondError(w, transport.NewAPIError(http.StatusInternalServerError, "Failed to create user", err))
-			return err
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return grouter.ErrorNotFound(nil, fmt.Errorf("user not found"))
+			}
+			return grouter.ErrorInternalServerError(nil, fmt.Errorf("failed to create user"))
 		}
 
 		session, err := h.core.session.CreateSession(
 			ctx,
 			user.ID,
-			getClientIP(r),
-			r.UserAgent(),
+			c.IP(),
+			c.Request.UserAgent(),
 			tx,
 		)
 		if err != nil {
-			h.RespondError(w, transport.NewAPIError(http.StatusInternalServerError, "Failed to create session", err))
-			return err
+			return grouter.ErrorInternalServerError("Failed to create session", err)
 		}
 
-		h.core.session.SetSessionCookie(w, session.Token)
+		h.core.session.SetSessionCookie(c.Response, session.Token)
 
-		h.RespondJSON(w, http.StatusCreated, dto.NewAuthResponse(*user, *session))
-		return nil
+		return c.JSON(dto.NewAuthResponse(*user, *session))
 	})
 }
 
-func (h *handlers) signIn(w http.ResponseWriter, r *http.Request) {
+func (h *handlers) signIn(c *grouter.Ctx) error {
 	var req dto.SignInPayload
-	if err := h.DecodeJSON(r, &req); err != nil {
-		h.RespondError(w, err)
-		return
+	if err := h.DecodeJSON(c, &req); err != nil {
+		return err
 	}
 
-	user, err := h.core.GetUserByEmail(r.Context(), req.Email)
+	user, err := h.core.GetUserByEmail(c.Context(), req.Email)
 	if err != nil || user.BannedUtil.Time.After(time.Now()) {
-		h.RespondError(w, transport.NewUnauthorizedError("Invalid credentials", err))
-		return
+		return grouter.ErrorUnauthorized("Invalid credentials", err)
 	}
 
 	if err := user.CheckPassword(req.Password); err != nil {
-		h.RespondError(w, transport.NewUnauthorizedError("Invalid credentials", err))
-		return
+		return grouter.ErrorUnauthorized("Invalid credentials", err)
 	}
 
 	session, err := h.core.session.CreateSession(
-		r.Context(),
+		c.Context(),
 		user.ID,
-		getClientIP(r),
-		r.UserAgent(),
+		c.IP(),
+		c.Request.UserAgent(),
 		nil,
 	)
 	if err != nil {
-		h.RespondError(w, transport.NewInternalServerError("Failed to create session", err))
-		return
+		return grouter.ErrorInternalServerError("Failed to create session", err)
 	}
 
-	h.core.session.SetSessionCookie(w, session.Token)
+	h.core.session.SetSessionCookie(c.Response, session.Token)
 
 	// Create a copy of the user for the response to avoid modifying the stored user
-	h.RespondJSON(w, http.StatusOK, dto.NewAuthResponse(*user, *session))
+	return c.JSON(dto.NewAuthResponse(*user, *session))
 }
 
-func (h *handlers) signOut(w http.ResponseWriter, r *http.Request) {
-	token := h.core.session.GetSessionFromRequest(r)
+func (h *handlers) signOut(c *grouter.Ctx) error {
+	token := h.core.session.GetSessionFromRequest(c)
 	if token == "" {
-		h.RespondError(w, transport.NewBadRequestError("No session token provided", nil))
-		return
+		return grouter.ErrorBadRequest("No session token provided", nil)
 	}
 
-	if err := h.core.session.DeleteSession(r.Context(), token); err != nil {
-		h.RespondError(w, transport.NewInternalServerError("Failed to delete session", err))
-		return
+	if err := h.core.session.DeleteSession(c.Context(), token); err != nil {
+		return grouter.ErrorInternalServerError("Failed to delete session", err)
 	}
 
-	h.core.session.ClearSessionCookie(w)
-	h.RespondJSON(w, http.StatusOK, map[string]string{"message": "Signed out successfully"})
+	h.core.session.ClearSessionCookie(c.Response)
+	return c.JSON(map[string]string{"message": "Signed out successfully"})
 }
 
-func (h *handlers) GetSession(w http.ResponseWriter, r *http.Request) {
-	token := h.core.session.GetSessionFromRequest(r)
+func (h *handlers) GetSession(c *grouter.Ctx) error {
+	token := h.core.session.GetSessionFromRequest(c)
 	if token == "" {
-		h.RespondError(w, transport.NewUnauthorizedError("No session token provided", nil))
-		return
+		return grouter.ErrorUnauthorized("No session token provided", nil)
 	}
 
-	session, err := h.core.session.ValidateSession(r.Context(), token)
+	session, err := h.core.session.ValidateSession(c.Context(), token)
 	if err != nil {
-		h.RespondError(w, transport.NewUnauthorizedError("Invalid session", err))
-		return
+		return grouter.ErrorUnauthorized("Invalid session", err)
 	}
 
-	user, err := h.core.GetUser(r.Context(), session.UserID)
+	user, err := h.core.GetUser(c.Context(), session.UserID)
 	if err != nil {
-		h.RespondError(w, transport.NewInternalServerError("Failed to get user", err))
-		return
+		return grouter.ErrorInternalServerError("Failed to get user", err)
 	}
 
-	h.RespondJSON(w, http.StatusOK, dto.NewSessionResponse(*user, *session))
+	return c.JSON(dto.NewSessionResponse(*user, *session))
 }
 
-func (h *handlers) resetPassword(w http.ResponseWriter, r *http.Request) {
+func (h *handlers) resetPassword(c *grouter.Ctx) error {
 	var req dto.ResetPasswordPayload
-	if err := h.DecodeJSON(r, &req); err != nil {
-		h.RespondError(w, err)
-		return
+	if err := h.DecodeJSON(c, &req); err != nil {
+		return err
 	}
 
 	// TODO: Implement password reset logic
-	h.RespondJSON(w, http.StatusOK, map[string]string{"message": "Password reset email sent"})
+	return c.JSON(map[string]string{"message": "Password reset email sent"})
 }
 
-func (h *handlers) verifyEmail(w http.ResponseWriter, r *http.Request) {
+func (h *handlers) verifyEmail(c *grouter.Ctx) error {
 	var req dto.VerifyEmailPayload
-	if err := h.DecodeJSON(r, &req); err != nil {
-		h.RespondError(w, err)
-		return
+	if err := h.DecodeJSON(c, &req); err != nil {
+		return err
 	}
 
 	// TODO: Implement email verification logic
-	h.RespondJSON(w, http.StatusOK, map[string]string{"message": "Email verified successfully"})
-}
-
-// Helper function to get client IP
-func getClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		return strings.TrimSpace(parts[0])
-	}
-
-	// Check X-Real-IP header
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return xri
-	}
-
-	// Use RemoteAddr
-	return strings.Split(r.RemoteAddr, ":")[0]
+	return c.JSON(map[string]string{"message": "Email verified successfully"})
 }

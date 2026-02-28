@@ -1,8 +1,8 @@
 // Package core provides core plugin interfaces for better-auth
 package core
 
-import "better-auth/pkg/router"
+import "github.com/azizndao/grouter"
 
 type Handler interface {
-	RegisterRoutes(group router.RouteGroup) error
+	RegisterRoutes(group grouter.RouteGroup) error
 }

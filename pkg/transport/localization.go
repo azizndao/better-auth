@@ -1,9 +1,9 @@
 package transport
 
 import (
-	"net/http"
 	"strings"
 
+	"github.com/azizndao/grouter"
 	"github.com/go-playground/locales/en"
 	"github.com/go-playground/locales/es"
 	"github.com/go-playground/locales/fr"
@@ -75,8 +75,8 @@ func setupFrenchTranslations(uni *ut.UniversalTranslator, validate *validator.Va
 }
 
 // detectLocale detects the user's preferred locale from the Accept-Language header
-func (t *Default) detectLocale(req *http.Request) string {
-	acceptLang := req.Header.Get(HeaderAcceptLanguage)
+func (t *Default) detectLocale(c *grouter.Ctx) string {
+	acceptLang := c.Get(HeaderAcceptLanguage)
 	if acceptLang == "" {
 		return DefaultLocale
 	}
@@ -126,4 +126,3 @@ func (t *Default) getTranslator(locale string) ut.Translator {
 	// Default to English
 	return t.translators[DefaultLocale]
 }
-

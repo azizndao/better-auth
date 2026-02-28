@@ -15,4 +15,3 @@ func NewDefault() Transport {
 		uni:         nil, // Not needed after initialization
 	}
 }
-

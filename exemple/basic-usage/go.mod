@@ -1,11 +1,12 @@
 module better-auth-example
 
-go 1.24.5
+go 1.25.1
 
 replace better-auth => ../../
 
 require (
 	better-auth v0.0.0-00010101000000-000000000000
+	github.com/azizndao/grouter v0.0.7
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.0
 )

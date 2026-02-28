@@ -12,6 +12,7 @@ import (
 
 	"better-auth/internal/models"
 
+	"github.com/azizndao/grouter"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -202,14 +203,14 @@ func (s *SessionService) ClearSessionCookie(w http.ResponseWriter) {
 }
 
 // GetSessionFromRequest extracts session token from HTTP request
-func (s *SessionService) GetSessionFromRequest(r *http.Request) string {
+func (s *SessionService) GetSessionFromRequest(c *grouter.Ctx) string {
 	// Try to get from cookie first
-	if cookie, err := r.Cookie("session_token"); err == nil {
+	if cookie, err := c.GetCookie("session_token"); err == nil {
 		return cookie.Value
 	}
 
 	// Try to get from Authorization header
-	if auth := r.Header.Get("Authorization"); auth != "" {
+	if auth := c.Authorization(); auth != "" {
 		const prefix = "Bearer "
 		if len(auth) > len(prefix) && auth[:len(prefix)] == prefix {
 			return auth[len(prefix):]

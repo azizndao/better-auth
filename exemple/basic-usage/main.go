@@ -8,6 +8,7 @@ import (
 
 	betterauth "better-auth"
 
+	"github.com/azizndao/grouter"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -21,13 +22,13 @@ func main() {
 
 	auth := setupAuth(db)
 
-	mux := http.NewServeMux()
-
-	mux.Handle("/auth/", auth.Handler())
+	router := grouter.NewRouter()
+	router.Use(grouter.Logger())
+	router.Route("/auth", auth.Handler())
 
 	slog.Default().Info("Listening on port 8080")
 
-	log.Fatal(http.ListenAndServe(":8080", mux))
+	log.Fatal(http.ListenAndServe(":8080", router))
 }
 
 func setupAuth(db *gorm.DB) *betterauth.BetterAuth {
